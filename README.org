@@ -13,9 +13,36 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-base.el=  | where it is; whether a frame is a text terminal, where controls are drawn in text; lengths in pixels, counted in cells there |
 | =lispm-ui-i18n.el=  | the language its words are shown in, and their translations, =i18n/=                                                     |
 | =lispm-ui-modal.el= | what its modal panels share: reading events without quitting, what each key does, focus rings, holding a control pressed |
+| =lispm-ui-ask.el=   | asking a person: an alert, a question to agree to, a choice, a file                                                      |
+| =lispm-ui-form.el=  | forms, written as data                                                                                                   |
 
-=lispm-ui.el= loads every part.  More come as LispM's interface moves here: forms, drawn controls,
-alerts, menus, and a dialog choosing a file.
+=lispm-ui.el= loads every part.  More come as LispM's interface moves here: drawn controls, alerts,
+menus, and a dialog choosing a file.
+
+* Forms
+
+A form is written as data, a title and its fields, and drawn as a dialog with Emacs's widgets:
+
+#+begin_src emacs-lisp
+(lispm-ui-form "New Character"
+  '((title :type text :label "Name" :required t)
+    (avatar :type picture :label "Picture")
+    (soul :type text-area :label "Soul" :lines 8))
+  :submit "Create"
+  :on-submit (lambda (values) (message "%S" values)))
+#+end_src
+
+Fields are of the types ~lispm-ui-form-types~ lists: text, text areas, pictures, pop-up menus,
+radio buttons, check boxes, rows of buttons and headings that start a group.  =TAB= goes from field
+to field, =C-c C-c= submits, =C-c C-k= cancels.  Whatever shows a form may dress it: see the
+Commentary of =lispm-ui-form.el=.  A program written for LispM's forms before they moved here,
+which requires ~lispm-form~, finds them by their former names.
+
+* Asking a person
+
+~lispm-ui-alert~, ~lispm-ui-confirm~, ~lispm-ui-choose~ and ~lispm-ui-choose-file~ ask in the
+minibuffer, never in the system's own dialogs, unless an interface draws them: it sets
+~lispm-ui-alert-function~, ~lispm-ui-choose-function~ or ~lispm-ui-choose-file-function~.
 
 * The keyboard
 

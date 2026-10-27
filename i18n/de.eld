@@ -6,4 +6,16 @@
 ;; the list of its forms; in the order the code writes them.
 
 (:name "Deutsch"
- :messages ())
+ :messages
+ (("Cancel" . "Abbrechen")
+  ("OK" . "OK")
+  ("Choose a File" . "Datei auswählen")
+  ("%s:" . "%s:")
+  ("TAB goes to the next field · C-c C-c %s · C-c C-k cancels" . "TAB: nächstes Feld · C-c C-c %s · C-c C-k bricht ab")
+  ("Choose…" . "Auswählen…")
+  ("No picture" . "Kein Bild")
+  ("Remove" . "Entfernen")
+  ("Picture: " . "Bild: ")
+  ("Not a picture: %s" . "Kein Bild: %s")
+  ("%s: fill this in" . "%s: bitte ausfüllen")
+  ("Not a form" . "Kein Formular")))

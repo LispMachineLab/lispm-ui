@@ -1,0 +1,57 @@
+#+title: LispM UI
+
+#+HTML: <p align="center"><a href="https://github.com/LispMachineLab/lispm-ui/actions/workflows/test.yml"><img src="https://github.com/LispMachineLab/lispm-ui/actions/workflows/test.yml/badge.svg" alt="test" /></a></p>
+
+The classic-style interface that LispM and its applications are drawn with, in any Emacs 30.1 or
+later, graphical or on a text terminal: its controls, forms, alerts, menus and dialogs, and the
+keys that work every one of them from the keyboard alone.  An application requires it and looks
+the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, the prefix is
+~lispm-ui-~.
+
+* What it holds
+
+| =lispm-ui-base.el=  | where it is; whether a frame is a text terminal, where controls are drawn in text; lengths in pixels, counted in cells there |
+| =lispm-ui-i18n.el=  | the language its words are shown in, and their translations, =i18n/=                                                     |
+| =lispm-ui-modal.el= | what its modal panels share: reading events without quitting, what each key does, focus rings, holding a control pressed |
+
+=lispm-ui.el= loads every part.  More come as LispM's interface moves here: forms, drawn controls,
+alerts, menus, and a dialog choosing a file.
+
+* The keyboard
+
+Every panel works from a keyboard without arrow or function keys, as the HHKB is: =C-f=, =C-b=,
+=C-n= and =C-p= go where the arrows do, =TAB= and =S-TAB= ring the next and previous control,
+=RET= chooses, =SPC= presses the control ringed, and =ESC= or =C-g= gives up.
+
+* Its words, in the language spoken
+
+Its words are written in English and shown in English, German, French, Japanese or Chinese,
+Simplified or Traditional: the language ~lispm-ui-language~ names, else that of the program
+showing it, else the computer's.  A program says its language with a function of
+~lispm-ui-language-functions~, and calls ~lispm-ui-language-changed~ when it speaks another:
+
+#+begin_src emacs-lisp
+(add-hook 'lispm-ui-language-functions (lambda () my-language))
+#+end_src
+
+* Installing it
+
+LispM installs it, and its App Store installs it before the applications that need it.
+Elsewhere, from git:
+
+#+begin_src emacs-lisp
+(package-vc-install "https://github.com/LispMachineLab/lispm-ui")
+#+end_src
+
+An application names it in its =Package-Requires=, as ~(lispm-ui "0.1.0")~, and requires the part
+it uses, or ~lispm-ui~ for all of them.
+
+* Testing
+
+=make test compile= runs the tests and byte-compiles the sources, warnings counted as errors.
+=make i18n= lists the messages each catalog lacks, and those it holds that the code no longer
+gives.
+
+* License
+
+GNU Affero General Public License, version 3 or later: see [[file:LICENSE][LICENSE]].

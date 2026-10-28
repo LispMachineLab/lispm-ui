@@ -346,6 +346,23 @@ once, its own first, so that the picture is still a document."
       (should (= (how-many "version=" (point-min) (point-max)) 2))
       (should (libxml-parse-xml-region (point-min) (point-max))))))
 
+(ert-deftest lispm-ui-test-svg-scaled ()
+  "An SVG sized in pixels without a viewBox, embedded smaller or larger, is
+scaled to fit, not cut; one of its own size, or with a viewBox, or sized
+in other units, is embedded as it is."
+  (skip-unless (fboundp 'libxml-parse-xml-region))
+  (let ((lispm-ui--svg-doms (make-hash-table :test #'equal)))
+    (cl-flet ((embedded (source width height)
+                (let ((svg (svg-create 64 64)))
+                  (lispm-ui-svg-embed svg (lispm-ui-svg-dom nil source) 0 0 width height)
+                  (dom-attr (car (dom-children svg)) 'viewBox))))
+      (should (equal (embedded "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"333\" height=\"233px\"/>" 64 64)
+                     "0 0 333 233"))
+      (should-not (embedded "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"/>" 16 16))
+      (should (equal (embedded "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"40\" viewBox=\"0 0 4 4\"/>" 64 64)
+                     "0 0 4 4"))
+      (should-not (embedded "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10mm\" height=\"10mm\"/>" 64 64)))))
+
 ;;;; lispm-ui-controls
 
 (defmacro lispm-ui-test--with-controls (&rest body)

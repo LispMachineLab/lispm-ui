@@ -285,9 +285,24 @@ printed again, see `lispm-ui--clean-dom'."
               (setq dom (seq-find (lambda (node) (eq (car-safe node) 'svg)) (nthcdr 2 dom))))
             (and dom (lispm-ui--clean-dom dom))))))))
 
+(defun lispm-ui--svg-length (value)
+  "Return VALUE, an SVG length, as a number of pixels, or nil when it is in
+other units or none."
+  (when (and (stringp value)
+             (string-match "\\`[ \t]*\\([0-9]*\\.?[0-9]+\\)[ \t]*\\(?:px\\)?[ \t]*\\'" value))
+    (string-to-number (match-string 1 value))))
+
 (defun lispm-ui-svg-embed (svg dom x y width height)
-  "Draw the SVG document DOM on SVG at X, Y, WIDTH by HEIGHT pixels."
+  "Draw the SVG document DOM on SVG at X, Y, WIDTH by HEIGHT pixels.
+A document sized in pixels without a viewBox is scaled to that size, as
+one with a viewBox is, not cut to it."
   (let ((copy (copy-tree dom)))
+    (unless (dom-attr copy 'viewBox)
+      (let ((own-width (lispm-ui--svg-length (dom-attr copy 'width)))
+            (own-height (lispm-ui--svg-length (dom-attr copy 'height))))
+        (when (and own-width own-height
+                   (not (and (= own-width width) (= own-height height))))
+          (dom-set-attribute copy 'viewBox (format "0 0 %s %s" own-width own-height)))))
     (dom-set-attribute copy 'x x)
     (dom-set-attribute copy 'y y)
     (dom-set-attribute copy 'width width)

@@ -737,6 +737,8 @@ one; of a form applying its changes at once, the one closing it, if any."
                                     :notify (lambda (widget &optional _child event)
                                               ;; Told once it is changed, not before too.
                                               (unless (eq (car-safe event) 'before-change)
+                                                (when (eq type 'password)
+                                                  (lispm-ui-form--mask-password widget event))
                                                 (lispm-ui-form--one-line widget)
                                                 (lispm-ui-form--changed key (widget-value widget))
                                                 (lispm-ui-form--shape-field widget))))))))
@@ -1055,8 +1057,43 @@ shown as stars."
 
 (define-widget 'lispm-ui-form-password 'editable-field
   "A text field of a form whose text is shown as stars."
-  :secret ?*
+  :value-create #'lispm-ui-form--password-create
   :value-get #'lispm-ui-form--password)
+
+(defun lispm-ui-form--password-stars (text)
+  "TEXT as stars, each keeping the character it stands for."
+  (let ((stars (make-string (length text) ?*)))
+    (dotimes (i (length text))
+      (put-text-property i (1+ i) 'secret
+                         (or (and (eq (aref text i) ?*) (get-text-property i 'secret text))
+                             (aref text i))
+                         stars))
+    (put-text-property 0 (length stars) 'rear-nonsticky '(secret) stars)
+    stars))
+
+(defun lispm-ui-form--password-create (widget)
+  "Insert the password field WIDGET as stars from the start."
+  (let ((value (widget-get widget :value)))
+    (unwind-protect
+        (progn
+          (widget-put widget :value (lispm-ui-form--password-stars value))
+          (widget-field-value-create widget))
+      (widget-put widget :value value))))
+
+(defun lispm-ui-form--mask-password (widget event)
+  "Mask the text added to the password field WIDGET by EVENT."
+  (when (eq (car-safe event) 'after-change)
+    (let* ((from (nth 1 event))
+           (to (min (nth 2 event) (widget-field-end widget)))
+           (stars (lispm-ui-form--password-stars (buffer-substring from to)))
+           (here (point))
+           (inhibit-modification-hooks t)
+           (buffer-undo-list t))
+      ;; The changed range includes typed spaces, unlike the field's text end.
+      (delete-region from to)
+      (goto-char from)
+      (insert stars)
+      (goto-char here))))
 
 (defun lispm-ui-form--password (widget)
   "The text of the password field WIDGET: what its stars stand for, a star

@@ -23,9 +23,10 @@
 ;;; Commentary:
 
 ;; LispM UI's palette, drawing, text, controls, the dressing of its
-;; forms, lists' headings, scroll bars and title bars came from LispM
-;; Desktop, where they were lispm-desktop-platinum-*,
-;; lispm-desktop-look-*, lispm-desktop-i18n-* and lispm-desktop-form-*.  What they make, palettes, SVG documents,
+;; forms, lists' headings, scroll bars, title bars, files' icons and
+;; the dialog choosing a file came from LispM Desktop, where they were
+;; lispm-desktop-platinum-*, lispm-desktop-look-*, lispm-desktop-i18n-*,
+;; lispm-desktop-form-* and lispm-desktop-choose-*.  What they make, palettes, SVG documents,
 ;; lines and forms as they show, must be what the desktop's made, so
 ;; that the desktop draws the same once it draws with LispM UI.
 ;;
@@ -211,6 +212,9 @@
     (lispm-ui-icon-file . lispm-desktop-platinum-icon-file)
     (lispm-ui-icon-picture . lispm-desktop-platinum-icon-picture)
     (lispm-ui-text-icon . lispm-desktop-platinum--text-icon)
+    (lispm-ui-file-icon-name . lispm-desktop-platinum-file-icon-name)
+    (lispm-ui-lisp-extensions . lispm-desktop-platinum-lisp-extensions)
+    (lispm-ui-code-extensions . lispm-desktop-platinum-code-extensions)
     ;; lispm-ui-popup.el
     (lispm-ui-popup-available-p . lispm-desktop-popup-available-p)
     (lispm-ui-popup-dispose . lispm-desktop-popup-dispose)
@@ -270,7 +274,14 @@
     (lispm-ui-menu-small . lispm-desktop-popup-small)
     (lispm-ui-menu-typed-keys . lispm-desktop-popup-typed-keys)
     (lispm-ui-modal-areas . lispm-desktop-area-prefixes)
-    (lispm-ui-modal-typed-p . lispm-desktop-typed-event-p))
+    (lispm-ui-modal-typed-p . lispm-desktop-typed-event-p)
+    ;; lispm-ui-file-dialog.el
+    (lispm-ui-choose-recent . lispm-desktop-choose-recent)
+    (lispm-ui-file-dialog--make-dialog . lispm-desktop-choose--make-dialog)
+    (lispm-ui-file-dialog--layout . lispm-desktop-choose--layout)
+    (lispm-ui-file-dialog--date . lispm-desktop-choose--date)
+    (lispm-ui-file-dialog--hit . lispm-desktop-choose--hit)
+    (lispm-ui-file-dialog-draw . lispm-desktop-choose-draw))
   "LispM UI's names of what moved from LispM Desktop, (NEW . OLD) each:
 the renames LispM Desktop makes, the other way round.")
 
@@ -854,7 +865,48 @@ the glyph function gives them: see `lispm-ui-golden--form'."
                              (lispm-ui-golden--intervals
                               (lispm-ui-menu--text items (lispm-ui-menu--width items) highlight))))
                      lispm-ui-golden--menus '(3 0))
-          (list (lispm-ui-golden--intervals (lispm-ui-menu--text (car lispm-ui-golden--menus) 18 6))))))))
+          (list (lispm-ui-golden--intervals (lispm-ui-menu--text (car lispm-ui-golden--menus) 18 6)))))))
+    ;; lispm-ui-icons.el, the files' icons
+    (file-icon-names
+     (mapcar #'lispm-ui-file-icon-name '("a.png" "b.el" "c.md" "d.org" "e.rs" "f" "G.JPG" "h.txt")))
+    ;; lispm-ui-file-dialog.el
+    (file-dialog-layout
+     (let ((layout (lispm-ui-file-dialog--layout)))
+       (list layout
+             (mapcar (pcase-lambda (`(,x . ,y))
+                       (lispm-ui-file-dialog--hit
+                        (lispm-ui-file-dialog--make-dialog
+                         :items (mapcar (lambda (i) (list (format "f%d" i) (format "/f%d" i) nil '(0 0)))
+                                        (number-sequence 1 20)))
+                        layout x y))
+                     '((30 . 40) (380 . 40) (410 . 40) (310 . 250) (380 . 250) (100 . 70) (200 . 70)
+                       (265 . 70) (60 . 90) (60 . 130) (265 . 90) (265 . 150) (265 . 200) (265 . 215)
+                       (300 . 150) (5 . 5))))))
+    (file-dialog-dates
+     (mapcar #'lispm-ui-file-dialog--date
+             (list nil (time-subtract nil 86400) (encode-time '(0 0 12 1 3 2024 nil nil t)))))
+    (file-dialogs
+     (let ((lispm-ui-choose-recent nil)
+           (old (encode-time '(0 0 12 1 3 2024 nil nil t)))
+           (older (encode-time '(0 0 12 9 11 2023 nil nil t))))
+       (mapcar
+        (pcase-lambda (`(,colors . ,options))
+          (lispm-ui-golden--print
+           (lispm-ui-file-dialog-draw
+            ;; The first of a keyword given twice wins: OPTIONS first.
+            (apply #'lispm-ui-file-dialog--make-dialog
+                   (append options
+                           `(:title "Choose a Picture" :directory "/Pictures/Holidays/"
+                             :items (("albums" "/Pictures/Holidays/albums" t ,older)
+                                     ("ada.png" "/Pictures/Holidays/ada.png" nil ,old)
+                                     ("notes.org" "/Pictures/Holidays/notes.org" nil ,older)
+                                     ("a picture with a name far too long for its column.png"
+                                      "/Pictures/Holidays/long.png" nil ,old)))))
+            (apply #'lispm-ui-derive-palette colors))))
+        `((,lispm-ui-golden--classic :selected 1)
+          (,lispm-ui-golden--classic :selected 0 :sort date :pressed choose)
+          (,lispm-ui-golden--dark :selected nil :descending t :pressed location)
+          (,lispm-ui-golden--dark :selected 3 :pressed cancel :title "A title far too long for the dialog's title bar, which is cut short with an ellipsis"))))))
   "The cases compared, (NAME FORM) each, FORM in LispM UI's names.")
 
 (defconst lispm-ui-golden-xml-cases
@@ -912,6 +964,7 @@ What they make is written in LispM UI's names, as a face it remaps."
   (require 'lispm-desktop-platinum-icons)
   (require 'lispm-desktop-popup)
   (require 'lispm-ui-base)
+  (require 'lispm-desktop-choose)
   (let ((names (mapcar (pcase-lambda (`(,new . ,old)) (cons new old)) lispm-ui-golden-names))
         (back (mapcar (pcase-lambda (`(,new . ,old)) (cons old new)) lispm-ui-golden-names))
         (print-length nil)

@@ -23,12 +23,14 @@
 
 ;;; Commentary:
 
-;; Icons are named, and found by their name: an interface with icons of
-;; its own, as a desktop's, finds them through `lispm-ui-icon-functions';
-;; LispM UI has those its alerts show, icons/caution.svg, stop.svg and
-;; note.svg.  An icon is shown as an image, or on a text terminal as a
-;; character in its colour, or drawn in block characters, see
-;; lispm-ui-raster.el.
+;; Icons are named, and found by their name: an interface with icons
+;; of its own, as a desktop's, finds them through
+;; `lispm-ui-icon-functions'; LispM UI has those its alerts show,
+;; icons/caution.svg, stop.svg and note.svg, and those its file dialog
+;; shows, folder.svg, disk.svg and a document's, document.svg or one
+;; of its kind's, which `lispm-ui-file-icon-name' tells.  An icon is
+;; shown as an image, or on a text terminal as a character in its
+;; colour, or drawn in block characters, see lispm-ui-raster.el.
 ;; Unlike controls, icons keep their own colours, as Mac OS 9's did
 ;; whatever the appearance.
 
@@ -55,7 +57,9 @@ does, adds one.")
 application's icon; for `emacs', the icon Emacs ships with, read from
 this Emacs's own data directory, else the document icon; else the file
 the first of `lispm-ui-icon-functions' finds, else LispM UI's own,
-icons/NAME.svg, whose alert icons are `caution', `stop' and `note'."
+icons/NAME.svg, whose alert icons are `caution', `stop' and `note', and
+whose file icons `folder', `disk', `document' and those
+`lispm-ui-file-icon-name' names."
   (pcase name
     ((pred (lambda (name) (and (stringp name) (file-name-absolute-p name)))) name)
     ('emacs (let ((file (expand-file-name "images/icons/hicolor/scalable/apps/emacs.svg"
@@ -157,6 +161,28 @@ cannot be shown, a blank."
                                                            :ascent 'center)
                                         lispm-ui--icons))))
      (t (propertize " " 'face 'lispm-ui-list 'display '(space :width (16)))))))
+
+;;;; Files' icons
+
+(defconst lispm-ui-lisp-extensions '("el" "lisp" "lsp" "cl" "scm" "ss" "rkt" "clj" "cljs"
+                                     "cljc" "edn" "fnl")
+  "Extensions of files shown with the Lisp document icon.")
+
+(defconst lispm-ui-code-extensions
+  '("c" "h" "cc" "cpp" "hpp" "m" "mm" "swift" "rs" "go" "zig" "py" "rb" "js" "jsx" "ts" "tsx"
+    "java" "kt" "scala" "hs" "ml" "ex" "exs" "erl" "lua" "php" "sh" "bash" "zsh" "fish" "nix"
+    "sol" "sql" "css" "scss" "html" "xml" "json" "yaml" "yml" "toml" "proto" "mk" "cmake")
+  "Extensions of files shown with the code document icon.")
+
+(defun lispm-ui-file-icon-name (file)
+  "Return the name of the document icon of FILE, by its kind."
+  (let ((extension (downcase (or (file-name-extension file) ""))))
+    (cond ((string-match-p (image-file-name-regexp) file) "document-image")
+          ((member extension lispm-ui-lisp-extensions) "document-lisp")
+          ((member extension '("md" "markdown" "mkd")) "document-markdown")
+          ((equal extension "org") "document-org")
+          ((member extension lispm-ui-code-extensions) "document-code")
+          (t "document"))))
 
 ;;;; Images on a text terminal
 

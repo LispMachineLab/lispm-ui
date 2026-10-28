@@ -17,7 +17,7 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-text.el=    | text laid out in pixels: widths, fitting with an ellipsis, aligning, breaking lines, Chinese and Japanese type          |
 | =lispm-ui-draw.el=    | what it draws with: SVG primitives, text and pictures drawn as Emacs shows them, and the cache of drawn images          |
 | =lispm-ui-raster.el=  | pictures drawn in text, in block characters, and as PNGs, for text terminals                                            |
-| =lispm-ui-icons.el=   | icons found by name: an interface's own, through a hook, and those its alerts show                                      |
+| =lispm-ui-icons.el=   | icons found by name: an interface's own, through a hook, and those its alerts and file dialog show                      |
 | =lispm-ui-controls.el= | its controls: push buttons and the default one's ring, pop-up menus, bevel buttons, radio buttons, check boxes, group boxes |
 | =lispm-ui-list.el=    | lists' column headings, the column sorted by pushed in, and disclosure triangles                                      |
 | =lispm-ui-scroll.el=  | scroll bars: where the thumb stands for what shows, and the bar drawn                                                  |
@@ -27,10 +27,10 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-popup.el=   | panels popped up over a frame, in child frames, holding their size                                                      |
 | =lispm-ui-alert.el=   | alerts, drawn as Mac OS 9 drew them, or in text on a text terminal                                                      |
 | =lispm-ui-menu.el=    | menus, drawn as Mac OS 9 drew them, submenus beside their items; choices shown in one                                   |
+| =lispm-ui-file-dialog.el= | the dialog choosing a file: a folder's list, the usual places, the files chosen lately, a picture's preview       |
 | =lispm-ui-form.el=    | forms, written as data                                                                                                   |
 
-=lispm-ui.el= loads every part.  More come as LispM's interface moves here: next, a dialog choosing
-a file.
+=lispm-ui.el= loads every part.  More come as LispM's interface moves here.
 
 * Controls
 
@@ -61,8 +61,10 @@ in methods specialized on it, or on its family of looks (see =lispm-ui-look.el=)
 
 ~lispm-ui-icon~ shows an icon by its name, as an image, or on a text terminal as a character in
 the icon's colour; ~lispm-ui-icon-picture~ draws it there in block characters instead.  LispM UI
-has the icons its alerts show, =caution=, =stop= and =note=; an interface with icons of its own
-finds them with a function of ~lispm-ui-icon-functions~:
+has the icons its alerts show, =caution=, =stop= and =note=, and those its file dialog shows,
+=folder=, =disk=, =document= and a document's of its kind, which ~lispm-ui-file-icon-name~ names
+by a file's name; an interface with icons of its own finds them with a function of
+~lispm-ui-icon-functions~:
 
 #+begin_src emacs-lisp
 (add-hook 'lispm-ui-icon-functions
@@ -86,8 +88,9 @@ A form is written as data, a title and its fields, and drawn as a dialog with Em
 
 Fields are of the types ~lispm-ui-form-types~ lists: text, passwords, text areas, pictures, pop-up
 menus, radio buttons, check boxes, rows of buttons, lists of things a row each with buttons of
-their own, statuses, and headings that start a group.  =TAB= goes from field to field, =C-c C-c=
-submits, =C-c C-k= cancels.
+their own, statuses, and headings that start a group; a picture's Choose… opens
+~lispm-ui-choose-file~, titled for a picture and previewing the one selected.  =TAB= goes from
+field to field, =C-c C-c= submits, =C-c C-k= cancels.
 
 A field's =:on-change= is called each time it is changed, and may change the others with
 ~lispm-ui-form-set~, which says a status again where it stands, as how a connection went, the rest
@@ -136,6 +139,13 @@ where no menu can pop up, it is chosen from in the minibuffer.
                  (:label "Wrap Lines" :action visual-line-mode :checked ,visual-line-mode)))
 #+end_src
 
+~lispm-ui-choose-file~ shows LispM UI's own dialog wherever it can be drawn, on a graphical
+frame once there is a palette, as Mac OS 9's Navigation Services showed one: a folder's list,
+sorted by name or date, a pop-up menu of the folders holding it, the usual places, the files
+chosen lately, which ~savehist-mode~ keeps, and a preview of the picture selected.  The keyboard
+works it all: =C-n= and =C-p= select, =RET= opens a folder or chooses the file, =C-b= goes up,
+=/= pops up the usual places, typing a name's first letters selects it, =ESC= or =C-g= cancels.
+
 * The keyboard
 
 Every panel works from a keyboard without arrow or function keys, as the HHKB is: =C-f=, =C-b=,
@@ -164,7 +174,7 @@ Elsewhere, from git, after LispM Kit, which it requires:
 (package-vc-install "https://github.com/LispMachineLab/lispm-ui")
 #+end_src
 
-An application names it in its =Package-Requires=, as ~(lispm-ui "0.4.0")~, and requires the part
+An application names it in its =Package-Requires=, as ~(lispm-ui "0.5.0")~, and requires the part
 it uses, or ~lispm-ui~ for all of them.
 
 * Testing

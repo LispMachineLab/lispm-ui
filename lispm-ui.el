@@ -4,7 +4,7 @@
 
 ;; Author: Ryan.K
 ;; URL: https://github.com/LispMachineLab/lispm-ui
-;; Version: 0.4.0
+;; Version: 0.5.0
 ;; Package-Requires: ((emacs "30.1") (lispm-kit "0.2.0"))
 ;; Keywords: convenience, faces, mouse
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
@@ -47,7 +47,7 @@
 ;;   lispm-ui-raster.el pictures drawn in text, in block characters, and
 ;;                      as PNGs, for text terminals
 ;;   lispm-ui-icons.el  icons, found by name: an interface's own, or
-;;                      the alerts', which LispM UI has
+;;                      the alerts' and files', which LispM UI has
 ;;   lispm-ui-controls.el
 ;;                      its controls: push buttons, pop-up menus, bevel
 ;;                      buttons, radio buttons, check boxes and group
@@ -63,6 +63,8 @@
 ;;   lispm-ui-popup.el  panels popped up over a frame, in child frames
 ;;   lispm-ui-alert.el  alerts, drawn
 ;;   lispm-ui-menu.el   menus, drawn, and choices shown in them
+;;   lispm-ui-file-dialog.el
+;;                      the dialog choosing a file
 ;;   lispm-ui-form.el   forms, written as data
 ;;
 ;; lispm-form.el keeps the names LispM's forms had before they moved
@@ -92,6 +94,7 @@
 (require 'lispm-ui-popup)
 (require 'lispm-ui-alert)
 (require 'lispm-ui-menu)
+(require 'lispm-ui-file-dialog)
 (require 'lispm-ui-form)
 
 (provide 'lispm-ui)

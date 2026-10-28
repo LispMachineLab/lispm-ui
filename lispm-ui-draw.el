@@ -293,6 +293,9 @@ printed again, see `lispm-ui--clean-dom'."
   (when-let* ((icon (lispm-ui-svg-dom file)))
     (lispm-ui-svg-embed svg icon x y size size)))
 
+;; An Emacs built without images, as one for text terminals, has none.
+(declare-function image-size "image.c" (spec &optional pixels frame))
+
 (defun lispm-ui--image-size (spec)
   "Return the size in pixels of image SPEC, as (WIDTH . HEIGHT).
 Where no image can be shown its :width and :height are taken, or 16."

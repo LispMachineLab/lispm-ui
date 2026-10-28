@@ -198,6 +198,9 @@ this is nil.")
 edges of its group boxes; :label, where its labels end; :control and
 :right, where its controls start and end.")
 
+(defvar-local lispm-ui-form--field-at-point nil
+  "The text field point was in after the last command, or nil.")
+
 (defun lispm-ui-form-title (&optional buffer)
   "Return the title of the form in BUFFER, by default the current buffer."
   (buffer-local-value 'lispm-ui-form--title (or buffer (current-buffer))))
@@ -438,7 +441,8 @@ Where pictures cannot be shown, the control is drawn as text anyway."
     (setq widget-field-list nil
           widget-field-new nil
           widget-field-last nil
-          lispm-ui-form--widgets nil)
+          lispm-ui-form--widgets nil
+          lispm-ui-form--field-at-point nil)
     (erase-buffer)
     (remove-overlays)
     (lispm-ui-form--layout)
@@ -466,7 +470,9 @@ Where pictures cannot be shown, the control is drawn as text anyway."
     (lispm-ui-form--shape)
     (when-let* ((widget (and key (alist-get key lispm-ui-form--widgets))))
       (goto-char (min (+ (or (widget-field-start widget) (widget-get widget :from)) (or offset 0))
-                      (or (widget-field-end widget) (widget-get widget :to)))))
+                      (or (widget-field-end widget) (widget-get widget :to))))
+      ;; Its text field, if it is one, shows point again.
+      (lispm-ui-form--keep-point))
     (run-hooks 'lispm-ui-form-drawn-hook)))
 
 (defun lispm-ui-form--buttons ()
@@ -524,6 +530,7 @@ Where pictures cannot be shown, the control is drawn as text anyway."
                                     :lispm-form-width (plist-get props :width)
                                     :action (lambda (&rest _) (widget-forward 1))
                                     :notify (lambda (widget &rest _)
+                                              (lispm-ui-form--one-line widget)
                                               (lispm-ui-form--set key (widget-value widget))
                                               (lispm-ui-form--shape-field widget)))))))
         ('text-area
@@ -654,22 +661,32 @@ the form's fields, each text area a panel as wide."
 
 (defun lispm-ui-form--shape-field (widget)
   "Make the text field WIDGET as wide as the form's fields, whatever its text.
-Its padding, the blanks Emacs's widgets end a field of a fixed size
-with, is drawn as one blank reaching to the right edge, the rest of it
-hidden, so that the field is one run of its face, framed once."
+It shows as much of its text as that holds, the rest hidden: its start,
+or, while point is in it, the text about point, scrolled as a dialog's
+field scrolls, so that a long text, as one pasted, never runs past the
+field's edge onto a line of its own.  Its padding, the blanks Emacs's
+widgets end a field of a fixed size with, is drawn as one blank reaching
+to the right edge, the rest of it hidden, so that the field is one run
+of its face, framed once."
   (let* ((start (widget-field-start widget))
          (end (widget-field-end widget))
          (text-end (widget-field-text-end widget))
+         (here (and start end (<= start (point) end)))
          ;; Blanks just typed are shown, though they end the text, until
          ;; point leaves them: they are as Emacs's widgets pad a field.
          (shown (if (and text-end end (< text-end (point) end)) (point) text-end))
+         (left (plist-get lispm-ui-form--geometry :control))
          (right (if-let* ((width (widget-get widget :lispm-form-width)))
-                    (+ (plist-get lispm-ui-form--geometry :control)
-                       (* width (plist-get lispm-ui-form--geometry :em)))
+                    (+ left (* width (plist-get lispm-ui-form--geometry :em)))
                   (plist-get lispm-ui-form--geometry :right))))
     (when (and start end text-end)
       (with-silent-modifications
-        (remove-list-of-text-properties start end '(display invisible))
+        (remove-list-of-text-properties start end '(display invisible lispm-ui-form-padding))
+        (pcase-let ((`(,from . ,to) (lispm-ui-form--field-window
+                                     widget start shown (and here (point)) (- right left))))
+          (widget-put widget :lispm-form-from (- from start))
+          (put-text-property start from 'invisible t)
+          (put-text-property to shown 'invisible t))
         (when (< shown end)
           ;; The last blank reaches the edge, the others before it are
           ;; hidden: the frame closes only where the field's face ends
@@ -677,20 +694,76 @@ hidden, so that the field is one run of its face, framed once."
           ;; after each command Emacs takes point out of text displayed
           ;; as nothing, even from its start, to the field's end, and
           ;; what is typed next goes there, after the blanks.
+          (put-text-property shown end 'lispm-ui-form-padding t)
           (put-text-property shown (1- end) 'invisible t)
           (put-text-property (1- end) end 'display `(space :align-to (,right))))))))
 
+(defun lispm-ui-form--field-window (widget start end point width)
+  "What the text field WIDGET shows of its text from START to END: (FROM . TO).
+That is as much as WIDTH pixels hold, less an em for the cursor after
+it.  While POINT, non-nil, is in the field, POINT is shown, the field
+scrolled no further than that needs from where it was; else its start."
+  (let* ((point (and point (min point end)))
+         (room (- width (plist-get lispm-ui-form--geometry :em)))
+         (fits (lambda (from to) (<= (lispm-ui-form--field-pixels widget from to) room)))
+         (from (if point
+                   (min point end (+ start (or (widget-get widget :lispm-form-from) 0)))
+                 start))
+         (to (lispm-ui-form--bisect (lambda (to) (funcall fits from to)) from end)))
+    (when (and point (or (> point to) (and (= to end) (> from start))))
+      ;; Point past what is shown, the field scrolls left as far as
+      ;; that needs; text taken away, what was scrolled out comes back.
+      (let ((last (max point to)))
+        (setq from (- last (lispm-ui-form--bisect (lambda (n) (funcall fits (- last n) last))
+                                                  0 (- last start)))
+              to (lispm-ui-form--bisect (lambda (to) (funcall fits from to)) last end))))
+    (cons from to)))
+
+(defun lispm-ui-form--bisect (holds low high)
+  "The last of the numbers LOW to HIGH for which the function HOLDS does:
+it holds for LOW and, once it does not, for none after."
+  (while (< low high)
+    (let ((middle (/ (+ low high 1) 2)))
+      (if (funcall holds middle)
+          (setq low middle)
+        (setq high (1- middle)))))
+  low)
+
+(defun lispm-ui-form--field-pixels (widget from to)
+  "Pixels the text of the text field WIDGET from FROM to TO takes."
+  (lispm-ui-form--measure (propertize (buffer-substring-no-properties from to)
+                                      'face (or (widget-get widget :value-face) 'widget-field))))
+
+(defun lispm-ui-form--one-line (widget)
+  "Take the line breaks out of the text field WIDGET, as a text pasted into
+it brings: a text field holds one line."
+  (when-let* ((start (widget-field-start widget)))
+    (save-excursion
+      (goto-char start)
+      (while (re-search-forward "[\n\r]+" (widget-field-end widget) t)
+        (replace-match "")))))
+
 (defun lispm-ui-form--keep-point ()
-  "Keep point out of the hidden padding of the text field it is in: at the
-end of what the field shows, where a dialog's field keeps it.  Run after
-each command in a form's buffer."
-  (when-let* ((field (widget-field-at (point)))
-              ((eq (widget-type field) 'editable-field))
-              (start (widget-field-start field))
-              (end (widget-field-end field))
-              (hidden (text-property-any start end 'invisible t))
-              ((< hidden (point))))
-    (goto-char hidden)))
+  "Keep point out of the padding of the text field it is in: at the end of
+what the field holds, where a dialog's field keeps it, the field scrolled
+to show it.  A text field point has left shows its start again.  Run
+after each command in a form's buffer."
+  ;; At its very end too, where `widget-end-of-line' goes, past its
+  ;; padding.
+  (let ((field (widget-field-find (point)))
+        (left lispm-ui-form--field-at-point))
+    (unless (and field (eq (widget-type field) 'editable-field))
+      (setq field nil))
+    (when-let* ((field)
+                (padding (text-property-any (widget-field-start field) (widget-field-end field)
+                                            'lispm-ui-form-padding t))
+                ((< padding (point))))
+      (goto-char padding))
+    (setq lispm-ui-form--field-at-point field)
+    (when (and left (not (eq left field)) (widget-field-start left))
+      (lispm-ui-form--shape-field left))
+    (when field
+      (lispm-ui-form--shape-field field))))
 
 (defun lispm-ui-form--shape-area (widget)
   "Make the text area WIDGET a panel as wide as the form's fields, framed:

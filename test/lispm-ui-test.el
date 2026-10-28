@@ -625,6 +625,61 @@ wander into its padding; a text area takes its lines."
             (should-not (get-text-property (1- (widget-field-text-end field)) 'invisible))))
       (kill-buffer buffer))))
 
+(defun lispm-ui-test--form-shown (key)
+  "What the text field KEY of the form in this buffer shows of its text."
+  (let ((field (alist-get key lispm-ui-form--widgets))
+        (shown ""))
+    (dotimes (i (- (widget-field-text-end field) (widget-field-start field)))
+      (let ((position (+ (widget-field-start field) i)))
+        (unless (get-text-property position 'invisible)
+          (setq shown (concat shown (string (char-after position)))))))
+    shown))
+
+(ert-deftest lispm-ui-test-form-long-text ()
+  "A text field is as wide as the form's fields, whatever is pasted into it:
+it keeps to one line, shows what its width holds, scrolled to show
+point while point is in it, and its start once point has left it."
+  (let ((buffer (lispm-ui-form "Pet" '((name :type text :label "Name")
+                                    (motto :type text :label "Motto"))))
+        (text "abcdefghij0123456789ABCDEFGHIJ0123456789klmnopqrst")
+        (room (1- lispm-ui-form-width)))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (lispm-ui-test--form-field 'name)
+          (kill-new (concat text "\n"))
+          (execute-kbd-macro (kbd "C-y"))
+          ;; The line break pasted is taken out: the field stays one line.
+          (should (equal (lispm-ui-form-value 'name) text))
+          (let ((field (alist-get 'name lispm-ui-form--widgets)))
+            (should-not (string-match-p "\n" (buffer-substring (widget-field-start field)
+                                                               (widget-field-end field))))
+            ;; Its end is shown, as much as fits, point after it.
+            (should (= (point) (widget-field-text-end field)))
+            (should (equal (lispm-ui-test--form-shown 'name) (substring text (- room))))
+            ;; Back at its start, its start is shown.
+            (execute-kbd-macro (kbd "C-a"))
+            (should (= (point) (widget-field-start field)))
+            (should (equal (lispm-ui-test--form-shown 'name) (substring text 0 room)))
+            ;; Moved past what is shown, it scrolls by as much.
+            (execute-kbd-macro (make-vector (1+ room) ?\C-f))
+            (should (equal (lispm-ui-test--form-shown 'name) (substring text 1 (1+ room))))
+            ;; Drawn again, it still shows point.
+            (lispm-ui-form-redraw)
+            (should (equal (lispm-ui-test--form-shown 'name) (substring text 1 (1+ room)))))
+          ;; Left, it shows its start.
+          (execute-kbd-macro (kbd "TAB"))
+          (should (equal (lispm-ui-test--form-shown 'name) (substring text 0 room)))
+          ;; Back at its end, text taken away brings back what was
+          ;; scrolled out.
+          (lispm-ui-test--form-field 'name)
+          (execute-kbd-macro (kbd "C-e"))
+          (should (equal (lispm-ui-test--form-shown 'name) (substring text (- room))))
+          (execute-kbd-macro (make-vector 30 ?\d))
+          (should (equal (lispm-ui-form-value 'name) (substring text 0 20)))
+          (should (equal (lispm-ui-test--form-shown 'name) (substring text 0 20))))
+      (kill-buffer buffer))))
+
 (ert-deftest lispm-ui-test-form-accessors ()
   "What a form shows is read by its accessors, from its buffer or another."
   (let ((buffer (lispm-ui-form "Pet" '((name :type text :label "Name")))))

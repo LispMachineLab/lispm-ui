@@ -1162,17 +1162,33 @@ choices, completion; a file, `read-file-name', never in a dialog box."
 its answer is the answer; a question to agree to is an alert, Cancel
 beside the default button its ACTION names."
   (let* ((called nil)
-         (lispm-ui-alert-function (lambda (&rest args) (push (cons 'alert args) called) t))
+         (lispm-ui-alert-function
+          (lambda (&rest args)
+            (push (cons 'alert args) called)
+            (nth 1 (seq-find (lambda (button) (eq (nth 2 button) 'default)) (nth 2 args)))))
          (lispm-ui-choose-function (lambda (&rest args) (push (cons 'choose args) called) '(big)))
          (lispm-ui-choose-file-function (lambda (&rest args) (push (cons 'file args) called) "/tmp/ada.png")))
-    (should (eq (lispm-ui-alert 'note "Done." '(("OK" ok default))) t))
+    (should (eq (lispm-ui-alert 'note "Done." '(("OK" ok default))) 'ok))
     (should (lispm-ui-confirm "Delete Ada?" nil "Delete"))
-    (should (equal (car called) '(alert caution "Delete Ada?" (("Cancel" nil cancel) ("Delete" t default)) nil)))
+    (should (equal (car called) '(alert caution "Delete Ada?" (("Cancel" cancel cancel) ("Delete" agree default))
+                                        nil)))
     (should (equal (lispm-ui-choose '((big . "Big")) nil 1 "Size") '(big)))
     (should (equal (car called) '(choose ((big . "Big")) nil 1 "Size")))
     (should (equal (lispm-ui-choose-file :title "Choose a Picture" :directory "/tmp/" :preview t) "/tmp/ada.png"))
     (should (equal (car called) '(file :title "Choose a Picture" :file nil :directory "/tmp/"
                                        :predicate nil :preview t)))))
+
+(ert-deftest lispm-ui-test-confirm-escape ()
+  "Escape never agrees to a question: its Cancel is worth something, as an
+alert taking a Cancel worth nil for none is dismissed by its default."
+  (let* ((lispm-ui-alert-function
+          (lambda (_icon _message buttons _detail)
+            ;; Escape, as an alert with no Cancel is dismissed by its default.
+            (let ((value (lambda (role) (nth 1 (seq-find (lambda (button) (eq (nth 2 button) role))
+                                                         buttons)))))
+              (or (funcall value 'cancel) (funcall value 'default))))))
+    (should-not (lispm-ui-confirm "Throw this note away?" "Its text will be lost." "Throw Away"))
+    (should-not (lispm-ui-confirm "Delete Ada?"))))
 
 ;;;; lispm-ui-i18n
 

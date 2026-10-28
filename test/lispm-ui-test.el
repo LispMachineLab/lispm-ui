@@ -2303,6 +2303,214 @@ alert taking a Cancel worth nil for none is dismissed by its default."
     (should-not (lispm-ui-confirm "Throw this note away?" "Its text will be lost." "Throw Away"))
     (should-not (lispm-ui-confirm "Delete Ada?"))))
 
+;;;; lispm-ui-file-dialog
+
+(defun lispm-ui-test--classic-palette ()
+  "Return the palette a classic theme gives."
+  (lispm-ui-derive-palette "#DDDDDD" "#000000" "#777777" "#6363CE"))
+
+(defmacro lispm-ui-test--with-pictures (&rest body)
+  "Run BODY with `folder' a folder of pictures and others: ada.png,
+bob.jpg, notes.txt, a hidden .secret.png and a folder albums holding
+cover.png, ada.png the latest; `picture-p' takes the pictures."
+  (declare (indent 0))
+  `(let* ((folder (file-name-as-directory (make-temp-file "lispm-ui-file-dialog" t)))
+          (picture-p (lambda (file) (string-match-p "\\.\\(png\\|jpg\\)\\'" file)))
+          (lispm-ui-choose-recent nil))
+     (unwind-protect
+         (progn
+           (make-directory (expand-file-name "albums" folder))
+           (dolist (file '("bob.jpg" "notes.txt" ".secret.png" "albums/cover.png" "ada.png"))
+             (write-region "" nil (expand-file-name file folder) nil 'silent))
+           (set-file-times (expand-file-name "bob.jpg" folder) (time-subtract nil 86400))
+           (set-file-times (expand-file-name "albums" folder) (time-subtract nil 3600))
+           ,@body)
+       (delete-directory folder t))))
+
+(defmacro lispm-ui-test--with-file-dialog-keys (&rest body)
+  "Run BODY where `lispm-ui-file-dialog' reads the events queued in
+`unread-command-events', its dialog drawn nowhere.  In BODY, `shown'
+holds each state of the dialog drawn, the latest first."
+  (declare (indent 0))
+  `(let ((shown nil))
+     (cl-letf (((symbol-function 'lispm-ui-popup-graphic-p) (lambda () t))
+               ;; The events queued, and no waiting for more.
+               ((symbol-function 'lispm-ui-modal-read-event)
+                (lambda (&optional _timeout)
+                  (or (pop unread-command-events) (error "The dialog waits for more events"))))
+               ((symbol-function 'lispm-ui-popup-make-frame) (lambda (&rest _) 'dialog))
+               ((symbol-function 'lispm-ui-file-dialog--show)
+                (lambda (_frame dialog)
+                  (push (list (lispm-ui-file-dialog--dialog-directory dialog)
+                              (car (lispm-ui-file-dialog--item dialog))
+                              (lispm-ui-file-dialog--dialog-pressed dialog))
+                        shown)))
+               ((symbol-function 'lispm-ui-popup-set-size) #'ignore)
+               ((symbol-function 'lispm-ui-popup-show) #'ignore)
+               ((symbol-function 'lispm-ui-popup-dispose) #'ignore)
+               ((symbol-function 'sit-for) #'ignore)
+               ((symbol-function 'redisplay) #'ignore))
+              ,@body)))
+
+(ert-deftest lispm-ui-test-file-dialog-keys ()
+  "The dialog choosing a file lists a folder's folders and the files it may
+choose, hidden ones aside, by name; the keyboard selects, opens folders,
+goes up, selects by the letters typed, chooses with Return, which
+blinks the default button, and cancels with Escape or C-g.  The file
+chosen is remembered among the recent ones."
+  (lispm-ui-test--with-pictures
+    (lispm-ui-test--with-file-dialog-keys
+      (cl-flet ((choose (events &rest args)
+                  (let ((unread-command-events events))
+                    (apply #'lispm-ui-file-dialog :directory folder :predicate picture-p args))))
+        (should (equal (choose '(return)) (expand-file-name "ada.png" folder)))
+        (should (equal (car lispm-ui-choose-recent) (expand-file-name "ada.png" folder)))
+        ;; Return blinked the default button.
+        (should (seq-find (lambda (state) (eq (nth 2 state) 'choose)) shown))
+        ;; Into albums, and its picture chosen.
+        (should (equal (choose '(?\C-n return return)) (expand-file-name "albums/cover.png" folder)))
+        ;; Into albums and up again, albums selected, then the next.
+        (should (equal (choose '(?\C-n ?\C-f ?\d ?\C-n return)) (expand-file-name "bob.jpg" folder)))
+        (should (equal (choose '(?b return)) (expand-file-name "bob.jpg" folder)))
+        (should (equal (choose '(?\M-> ?\C-p return return)) (expand-file-name "albums/cover.png" folder)))
+        ;; It opens on the file given, selected.
+        (should (equal (choose '(return) :file (expand-file-name "bob.jpg" folder))
+                       (expand-file-name "bob.jpg" folder)))
+        (should-not (choose '(escape)))
+        (should-not (choose '(?\C-n ?\C-g)))))))
+
+(ert-deftest lispm-ui-test-file-dialog-items ()
+  "The dialog's list holds the folders and the files it may choose, sorted
+by name or by date, the latest first, either way turned over; what is
+selected stays selected as the order changes."
+  (lispm-ui-test--with-pictures
+    (let ((dialog (lispm-ui-file-dialog--make-dialog :predicate picture-p)))
+      (lispm-ui-file-dialog--go dialog folder)
+      (should (equal (mapcar #'car (lispm-ui-file-dialog--dialog-items dialog)) '("ada.png" "albums" "bob.jpg")))
+      (should (equal (mapcar (lambda (item) (nth 2 item)) (lispm-ui-file-dialog--dialog-items dialog)) '(nil t nil)))
+      (lispm-ui-file-dialog--select dialog 2)
+      (setf (lispm-ui-file-dialog--dialog-sort dialog) 'date)
+      (lispm-ui-file-dialog--sort dialog)
+      (should (equal (mapcar #'car (lispm-ui-file-dialog--dialog-items dialog)) '("ada.png" "albums" "bob.jpg")))
+      (setf (lispm-ui-file-dialog--dialog-descending dialog) t)
+      (lispm-ui-file-dialog--sort dialog)
+      (should (equal (mapcar #'car (lispm-ui-file-dialog--dialog-items dialog)) '("bob.jpg" "albums" "ada.png")))
+      (should (equal (car (lispm-ui-file-dialog--item dialog)) "bob.jpg"))
+      ;; Names sort whatever their case, the numbers in them counted.
+      (make-directory (expand-file-name "Avatars" folder))
+      (dolist (file '("Zed.png" "z10.png" "z9.png"))
+        (write-region "" nil (expand-file-name file folder) nil 'silent))
+      (setf (lispm-ui-file-dialog--dialog-sort dialog) 'name
+            (lispm-ui-file-dialog--dialog-descending dialog) nil)
+      (lispm-ui-file-dialog--go dialog folder)
+      (should (equal (mapcar #'car (lispm-ui-file-dialog--dialog-items dialog))
+                     '("ada.png" "albums" "Avatars" "bob.jpg" "z9.png" "z10.png" "Zed.png")))
+      ;; Today's and yesterday's dates are said so.
+      (should (equal (lispm-ui-file-dialog--date nil) "Today"))
+      (should (equal (lispm-ui-file-dialog--date (time-subtract nil 86400)) "Yesterday")))))
+
+(ert-deftest lispm-ui-test-file-dialog-mouse ()
+  "The dialog's parts stand where it draws them and answer the mouse: a
+click selects a row, a double click opens a folder, a heading sorts by
+its column, the sort-direction button turns the order over, and the
+scroll bar's arrows and track scroll the list."
+  (lispm-ui-test--with-pictures
+    (let* ((lispm-ui-current-palette (lispm-ui-test--classic-palette))
+           (dialog (lispm-ui-file-dialog--make-dialog :predicate picture-p))
+           (layout (lispm-ui-file-dialog--layout)))
+      (dotimes (i 20)
+        (write-region "" nil (expand-file-name (format "z%02d.png" i) folder) nil 'silent))
+      (lispm-ui-file-dialog--go dialog folder)
+      (cl-flet ((click (part &optional dx dy double)
+                  (pcase-let ((`(,x ,y ,_ ,_) (plist-get layout part)))
+                    (cl-letf (((symbol-function 'lispm-ui-modal-over)
+                               (lambda (event _frame) (event-start event))))
+                      (lispm-ui-file-dialog--click
+                       'dialog dialog
+                       (list (if double 'double-down-mouse-1 'down-mouse-1)
+                             (list (selected-window) 1 (cons (+ x (or dx 0)) (+ y (or dy 0))) 0)))))))
+        ;; The parts do not overlap: the list and the preview, the buttons.
+        (pcase-let ((`(,lx ,_ ,lw ,_) (plist-get layout :list))
+                    (`(,px ,_ ,pw ,_) (plist-get layout :preview))
+                    (`(,cx ,_ ,cw ,_) (plist-get layout :cancel))
+                    (`(,ox ,_ ,ow ,_) (plist-get layout :choose)))
+          (should (< (+ lx lw) px))
+          (should (< (+ cx cw) ox))
+          (should (<= (+ ox ow 3) (+ px pw)))
+          (should (<= (+ px pw) (plist-get layout :width))))
+        (should (eq (lispm-ui-file-dialog--hit dialog layout (+ (nth 0 (plist-get layout :cancel)) 5)
+                                               (+ (nth 1 (plist-get layout :cancel)) 5))
+                    'cancel))
+        ;; The third row selected, then albums opened with a double click.
+        (click :rows 40 (+ 5 (* 2 lispm-ui-file-dialog-row-height)))
+        (should (equal (car (lispm-ui-file-dialog--item dialog)) "bob.jpg"))
+        (click :rows 40 (+ 5 lispm-ui-file-dialog-row-height) t)
+        (should (string-suffix-p "albums/" (lispm-ui-file-dialog--dialog-directory dialog)))
+        (lispm-ui-file-dialog--up dialog)
+        ;; The Date Modified heading sorts by date, the latest first.
+        (click :header (- (nth 2 (plist-get layout :header)) 30) 5)
+        (should (eq (lispm-ui-file-dialog--dialog-sort dialog) 'date))
+        (click :header (- (nth 2 (plist-get layout :header)) 5) 5)
+        (should (lispm-ui-file-dialog--dialog-descending dialog))
+        (click :header 20 5)
+        (should (eq (lispm-ui-file-dialog--dialog-sort dialog) 'name))
+        ;; The scroll bar's down arrow scrolls a row, the track a page.
+        (pcase-let* ((`(,_ ,_ ,_ ,height) (plist-get layout :scroll))
+                     (bar (lispm-ui-scroll-layout height)))
+          (setf (lispm-ui-file-dialog--dialog-top dialog) 0)
+          (click :scroll 5 (+ (plist-get bar :down) 5))
+          (should (= (lispm-ui-file-dialog--dialog-top dialog) 1))
+          (click :scroll 5 (+ (plist-get bar :up) 5))
+          (should (= (lispm-ui-file-dialog--dialog-top dialog) 0))
+          (click :scroll 5 (- (plist-get bar :up) 3))
+          (should (= (lispm-ui-file-dialog--dialog-top dialog) lispm-ui-file-dialog-rows)))))))
+
+(ert-deftest lispm-ui-test-file-dialog-drawn ()
+  "The dialog is drawn as one image as wide and tall as its layout says,
+its title, headings, items and buttons on it."
+  (lispm-ui-test--with-pictures
+    (let* ((lispm-ui-current-palette (lispm-ui-test--classic-palette))
+           (dialog (lispm-ui-file-dialog--make-dialog :title "Choose a Picture" :predicate picture-p :preview t))
+           (layout (lispm-ui-file-dialog--layout)))
+      (lispm-ui-file-dialog--go dialog folder)
+      (let ((text (with-temp-buffer
+                    (svg-print (lispm-ui-file-dialog-draw dialog lispm-ui-current-palette))
+                    (buffer-string))))
+        (should (string-match-p (format "width=\"%d\"" (plist-get layout :width)) text))
+        (dolist (word '("Choose a Picture" "Name" "Date Modified" "ada.png" "albums" "bob.jpg" "Cancel" "Choose"))
+          (should (string-search word text)))
+        (should-not (string-search "notes.txt" text))))))
+
+(ert-deftest lispm-ui-test-file-dialog-fallback ()
+  "Where no dialog can be drawn, the file is read in the minibuffer, never
+in the system's own panel, among the files the dialog would list."
+  (lispm-ui-test--with-pictures
+    (let ((asked nil))
+      (cl-letf (((symbol-function 'read-file-name)
+                 (lambda (_prompt directory _default _mustmatch _initial predicate)
+                   (push (list directory use-dialog-box (funcall predicate (expand-file-name "notes.txt" folder))
+                               (and (funcall predicate (expand-file-name "ada.png" folder)) t))
+                         asked)
+                   (expand-file-name "ada.png" folder))))
+        (should (equal (lispm-ui-file-dialog :directory folder :predicate picture-p)
+                       (expand-file-name "ada.png" folder)))
+        (should (equal asked `((,folder nil nil t))))))))
+
+(ert-deftest lispm-ui-test-file-dialog-by-default ()
+  "LispM UI's dialog chooses a file unless an interface shows its own;
+where it cannot be drawn, without a palette or on a text terminal, the
+minibuffer asks.  The files chosen lately are kept from one session to
+the next with savehist."
+  (should (eq (default-value 'lispm-ui-choose-file-function) #'lispm-ui-file-dialog))
+  (let ((lispm-ui-current-palette nil)
+        (asked nil))
+    (cl-letf (((symbol-function 'read-file-name)
+               (lambda (&rest _) (setq asked t) (expand-file-name "missing" temporary-file-directory))))
+      (should-not (lispm-ui-choose-file :directory temporary-file-directory))
+      (should asked)))
+  (require 'savehist)
+  (should (memq 'lispm-ui-choose-recent savehist-additional-variables)))
+
 ;;;; lispm-ui-i18n
 
 (defun lispm-ui-test--messages ()

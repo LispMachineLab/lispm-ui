@@ -47,7 +47,7 @@
 ;;   lispm-ui-raster.el pictures drawn in text, in block characters, and
 ;;                      as PNGs, for text terminals
 ;;   lispm-ui-icons.el  icons, found by name: an interface's own, or
-;;                      the alerts', which LispM UI has
+;;                      the alerts' and files', which LispM UI has
 ;;   lispm-ui-controls.el
 ;;                      its controls: push buttons, pop-up menus, bevel
 ;;                      buttons, radio buttons, check boxes and group
@@ -63,6 +63,8 @@
 ;;   lispm-ui-popup.el  panels popped up over a frame, in child frames
 ;;   lispm-ui-alert.el  alerts, drawn
 ;;   lispm-ui-menu.el   menus, drawn, and choices shown in them
+;;   lispm-ui-file-dialog.el
+;;                      the dialog choosing a file
 ;;   lispm-ui-form.el   forms, written as data
 ;;
 ;; lispm-form.el keeps the names LispM's forms had before they moved
@@ -92,6 +94,7 @@
 (require 'lispm-ui-popup)
 (require 'lispm-ui-alert)
 (require 'lispm-ui-menu)
+(require 'lispm-ui-file-dialog)
 (require 'lispm-ui-form)
 
 (provide 'lispm-ui)

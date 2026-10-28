@@ -39,9 +39,10 @@
 ;; dialogs, unless something draws it: `lispm-ui-alert-function',
 ;; `lispm-ui-choose-function' and `lispm-ui-choose-file-function' are
 ;; called instead when set, with the same arguments, and return what
-;; these do.  An alert, and choices, are drawn by LispM UI itself, by
-;; default, once it has a palette to draw in, see lispm-ui-alert.el and
-;; lispm-ui-menu.el.  The keyboard answers each, whatever draws it.
+;; these do.  An alert, choices and a file are drawn by LispM UI itself,
+;; by default, once it has a palette to draw in, see lispm-ui-alert.el,
+;; lispm-ui-menu.el and lispm-ui-file-dialog.el.  The keyboard answers
+;; each, whatever draws it.
 
 ;;; Code:
 
@@ -157,10 +158,14 @@ minibuffer after LABEL."
 
 ;;;; Files
 
-(defvar lispm-ui-choose-file-function nil
+(autoload 'lispm-ui-file-dialog "lispm-ui-file-dialog")
+
+(defvar lispm-ui-choose-file-function #'lispm-ui-file-dialog
   "Function showing files to choose one of, as a dialog does, or nil for
 the minibuffer.  It is called with the keyword arguments of
-`lispm-ui-choose-file', and returns what it returns.")
+`lispm-ui-choose-file', and returns what it returns.  By default it is
+LispM UI's own dialog, which reads the file in the minibuffer where it
+cannot be drawn.")
 
 (defun lispm-ui--choose-file-in-minibuffer (title file directory predicate)
   "Read a file in the minibuffer, as the dialog of TITLE would choose one:

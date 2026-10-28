@@ -152,7 +152,7 @@ apart from the rest of Emacs."
            (lispm-ui-palette-functions nil)
            (lispm-ui-palette-changed-hook nil)
            (faces (mapcar (lambda (face) (cons face (copy-sequence (face-all-attributes face))))
-                          '(lispm-ui-title lispm-ui-small lispm-ui-field lispm-ui-field-focused
+                          '(lispm-ui-title lispm-ui-title-inactive lispm-ui-small lispm-ui-field lispm-ui-field-focused
                             lispm-ui-button lispm-ui-button-pressed))))
        (cl-letf (((symbol-function 'face-background)
                   (lambda (face &rest _) (and (eq face 'default) content)))
@@ -186,6 +186,8 @@ be read leaves the palette as it was."
       (should (equal (plist-get (face-attribute 'lispm-ui-field-focused :box) :color) "#6363CE"))
       (should (equal (face-attribute 'lispm-ui-button :background) (lispm-ui-color :chrome)))
       (should (eq (face-attribute 'lispm-ui-small :inherit) 'lispm-ui-list))
+      (should (equal (face-attribute 'lispm-ui-title-inactive :foreground) (lispm-ui-color :muted)))
+      (should (eq (face-attribute 'lispm-ui-title-inactive :inherit) 'unspecified))
       (setq lispm-ui-palette-functions (list (lambda () '(:chrome "#CCCCCC" :focus "#FF0000"))
                                              (lambda () '(:focus "#00FF00"))))
       (lispm-ui-palette-update)
@@ -469,6 +471,101 @@ the focus colour."
       (let ((focused (lispm-ui-text-control "[x]" t)))
         (should (equal (plist-get (get-text-property 0 'face focused) :background)
                        (lispm-ui-color :focus)))))))
+
+;;;; lispm-ui-list
+
+(ert-deftest lispm-ui-test-list-header ()
+  "A list's headings are as wide as their columns and the sort-direction
+button; a disclosure triangle is an image, or a character on a text
+terminal, pointing down when open."
+  (lispm-ui-test--with-controls
+    (let ((header (lispm-ui-draw-list-header lispm-ui-current-palette
+                                             '(("Name" 150 nil 28) ("Date Modified" 96 t 6)))))
+      (should (equal (dom-attr header 'width) 262))
+      (should (equal (dom-attr header 'height) lispm-ui-list-header-height)))
+    (should (eq (car (get-text-property 0 'display (lispm-ui-triangle t))) 'image))
+    (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&rest _) t)))
+      (should (equal (lispm-ui-triangle t) "▾"))
+      (should (equal (lispm-ui-triangle nil) "▸")))))
+
+;;;; lispm-ui-scroll
+
+(ert-deftest lispm-ui-test-scroll-thumb ()
+  "The thumb is as long as the share shown, and as far down as the start;
+the arrows take the bar's bottom.  Everything shown, or a track too
+short, has no thumb."
+  (let ((arrows (1+ (* 2 lispm-ui-scroll-arrow))))
+    (should-not (lispm-ui-scroll-thumb 400 1 1000 1 1000))
+    (should-not (lispm-ui-scroll-thumb (+ 24 arrows) 1 2 1 100))
+    (should (equal (lispm-ui-scroll-thumb (+ 300 arrows) 1 101 1 1001) '(0 . 30)))
+    (pcase-let ((`(,top . ,length) (lispm-ui-scroll-thumb (+ 300 arrows) 901 1001 1 1001)))
+      (should (= (+ top length) 300)))
+    ;; A short thumb is never shorter than an arrow's box.
+    (should (= (cdr (lispm-ui-scroll-thumb 400 1 2 1 100000)) 16))
+    (let ((layout (lispm-ui-scroll-layout (+ 300 arrows))))
+      (should (= (plist-get layout :track-length) 300))
+      (should (= (plist-get layout :up) 300))
+      (should (= (plist-get layout :down) (+ 300 lispm-ui-scroll-arrow))))))
+
+(ert-deftest lispm-ui-test-scroll-bar-drawn-by-look ()
+  "A scroll bar is drawn in the look in use: its own method, where it has
+one, before the classic look's."
+  (let ((palette (lispm-ui-derive-palette "#DDDDDD" "#000000" "#777777" "#6363CE"))
+        (lispm-ui-looks nil))
+    (lispm-ui-look-define 'test-flat :family 'test-flat)
+    (cl-defmethod lispm-ui-scroll-layout (height &context (lispm-ui-look (lispm-ui-look-family test-flat)))
+      (plist-put (cl-call-next-method) :track 16))
+    (let ((lispm-ui-look 'test-flat))
+      (should (= (plist-get (lispm-ui-scroll-layout 100) :track) 16)))
+    (should (= (plist-get (lispm-ui-scroll-layout 100) :track) 0))
+    (dolist (thumb '((40 . 30) nil))
+      (dolist (active '(t nil))
+        (let ((bar (lispm-ui-draw-scroll-bar palette 300 thumb active)))
+          (should (equal (dom-attr bar 'width) lispm-ui-scroll-width))
+          (should (equal (dom-attr bar 'height) 300)))))))
+
+;;;; lispm-ui-window
+
+(ert-deftest lispm-ui-test-title-layout ()
+  "A short title sits in the middle of its bar, ridges either side, the
+boxes spaced as Mac OS 9 spaced them; a title too wide is narrowed,
+keeping ridges either side; a bar lacking boxes gives their room to the
+title; margins stand the boxes nearest the ends that far in."
+  (let* ((s lispm-ui-title-box-size)
+         (margin lispm-ui-title-box-margin)
+         (layout (lispm-ui-title-layout 600 100)))
+    (should (= (plist-get layout :title) 100))
+    (should (= (plist-get layout :label-x) 250))
+    (should (= (plist-get layout :start) (+ 3 s)))
+    (should (= (car (nth 0 (plist-get layout :ridges))) (+ 3 s 4)))
+    (should (= (plist-get layout :end) (- 600 3 s 3 s)))
+    (pcase-let* ((long (lispm-ui-title-layout 300 1000))
+                 (`((,a . ,b) (,c . ,d)) (plist-get long :ridges)))
+      (should (< (plist-get long :title) 300))
+      (should (>= (- b a) 12))
+      (should (>= (- d c) 12))
+      (should (> (plist-get (lispm-ui-title-layout 300 1000 '(on nil nil)) :title)
+                 (plist-get long :title))))
+    (let ((dialog (lispm-ui-title-layout 448 100 '(nil nil nil))))
+      (should (= (plist-get dialog :start) 0))
+      (should (= (plist-get dialog :end) (- 448 margin)))
+      (should (= (plist-get dialog :label-x) 174)))
+    (let ((wide (lispm-ui-title-layout 600 100 nil '(12 . 15))))
+      (should (equal (plist-get wide :margins) '(12 . 15)))
+      (should (= (plist-get wide :start) (+ 12 s))))))
+
+(ert-deftest lispm-ui-test-title-part ()
+  "A stretch of title bar is as tall as a title bar; active, it is lit
+along its top over the content's black line, and its label is drawn in
+the titles' face; inactive, its label is greyed."
+  (let* ((palette (lispm-ui-derive-palette "#DDDDDD" "#000000" "#777777" "#6363CE"))
+         (active (lispm-ui-draw-title-part palette 200 :active t :ridges '((10 . 60)) :label "Choose"
+                                           :label-x 80 :lead t :trail t))
+         (inactive (lispm-ui-draw-title-part palette 200 :label "Choose" :label-x 80)))
+    (should (equal (dom-attr active 'height) lispm-ui-title-bar-height))
+    (should (equal (dom-attr (car (dom-by-tag active 'text)) 'fill) (plist-get palette :text)))
+    (should (equal (dom-attr (car (dom-by-tag inactive 'text)) 'fill) (lispm-ui-grey palette #x77)))
+    (should (< (length (dom-by-tag inactive 'rect)) (length (dom-by-tag active 'rect))))))
 
 ;;;; lispm-ui-modal
 

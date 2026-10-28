@@ -201,6 +201,10 @@ drew it with, and a theme of other colours gets their counterparts."
   "Face of the system font: titles, push buttons, menus."
   :group 'lispm-ui)
 
+(defface lispm-ui-title-inactive '((t :weight bold :inherit shadow))
+  "Face of an inactive window's title: the system font, greyed."
+  :group 'lispm-ui)
+
 (defface lispm-ui-list nil
   "Face of the application font: lists, labels and fields."
   :group 'lispm-ui)
@@ -232,6 +236,8 @@ look's families."
   (let ((text (lispm-ui-color :text))
         (chrome (lispm-ui-color :chrome)))
     (set-face-attribute 'lispm-ui-title nil :foreground text)
+    (set-face-attribute 'lispm-ui-title-inactive nil
+                        :foreground (lispm-ui-color :muted) :inherit 'unspecified)
     (set-face-attribute 'lispm-ui-small nil :inherit 'lispm-ui-list :height 90 :weight 'normal)
     ;; A field is drawn over a theme's own `widget-field': none of the
     ;; lines that theme draws about it are its.

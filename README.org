@@ -24,10 +24,12 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-window.el=  | windows' title bars, laid out and drawn, as a dialog's title                                                           |
 | =lispm-ui-modal.el=   | what its modal panels share: reading events without quitting, what each key does, focus rings, holding a control pressed |
 | =lispm-ui-ask.el=     | asking a person: an alert, a question to agree to, a choice, a file                                                      |
+| =lispm-ui-popup.el=   | panels popped up over a frame, in child frames, holding their size                                                      |
+| =lispm-ui-alert.el=   | alerts, drawn as Mac OS 9 drew them, or in text on a text terminal                                                      |
 | =lispm-ui-form.el=    | forms, written as data                                                                                                   |
 
-=lispm-ui.el= loads every part.  More come as LispM's interface moves here: alerts, menus, and a
-dialog choosing a file.
+=lispm-ui.el= loads every part.  More come as LispM's interface moves here: menus, and a dialog
+choosing a file.
 
 * Controls
 
@@ -113,8 +115,11 @@ LispM's forms before they moved here, which requires ~lispm-form~, finds them by
 * Asking a person
 
 ~lispm-ui-alert~, ~lispm-ui-confirm~, ~lispm-ui-choose~ and ~lispm-ui-choose-file~ ask in the
-minibuffer, never in the system's own dialogs, unless an interface draws them: it sets
-~lispm-ui-alert-function~, ~lispm-ui-choose-function~ or ~lispm-ui-choose-file-function~.
+minibuffer, never in the system's own dialogs, unless something draws them.  LispM UI draws an
+alert itself, as Mac OS 9 drew one, once it has a palette: over the selected frame, or in text on
+a text terminal whose Emacs shows child frames, as Emacs 31's does.  An interface drawing them its
+own way sets ~lispm-ui-alert-function~, ~lispm-ui-choose-function~ or
+~lispm-ui-choose-file-function~.
 
 * The keyboard
 

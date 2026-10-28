@@ -914,6 +914,271 @@ reads the fuzz as eighths, a cell is a drag."
     (should-not (lispm-ui-modal-moved-p '(2 . 0) t))
     (should (lispm-ui-modal-moved-p '(3 . 0) t))))
 
+;;;; lispm-ui-popup, lispm-ui-alert
+
+(defmacro lispm-ui-test--on-tty (&rest body)
+  "Run BODY as on a text terminal, in a classic palette."
+  (declare (indent 0))
+  `(let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic)))
+     (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) t)))
+       ,@body)))
+
+(ert-deftest lispm-ui-test-popups-fall-back ()
+  "Without a palette, or a display to pop up on, an alert asks in the
+minibuffer, a letter a button, as LispM UI's alert does by default."
+  (should (eq lispm-ui-alert-function #'lispm-ui-alert-default))
+  (should-not (lispm-ui-popup-available-p))
+  (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic)))
+    (should-not (lispm-ui-popup-available-p)))
+  (cl-letf (((symbol-function 'read-multiple-choice) (lambda (&rest _) '(?s "Save"))))
+    (should (eq (lispm-ui-alert-default 'caution "Save?" '(("Cancel" cancel cancel)
+                                                           ("Save" save default)))
+                'save))
+    (should (eq (lispm-ui-alert 'caution "Save?" '(("Cancel" cancel cancel) ("Save" save default)))
+                'save))))
+
+(ert-deftest lispm-ui-test-confirm-by-default ()
+  "A question to agree to is an alert once LispM UI has a palette to draw
+it in, or an interface draws alerts its own way; before, it is asked as
+yes or no, as LispM UI asked before it drew alerts."
+  (let ((asked nil))
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (prompt) (push (cons 'yes-or-no prompt) asked) t))
+              ((symbol-function 'read-multiple-choice)
+               (lambda (prompt choices &rest _) (push (cons 'choice prompt) asked) (cadr choices))))
+      (let ((lispm-ui-current-palette nil))
+        (should-not (lispm-ui--alert-shown-p))
+        (should (lispm-ui-confirm "Delete Ada?" nil "Delete"))
+        (should (equal (car asked) '(yes-or-no . "Delete Ada? "))))
+      (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic)))
+        (should (lispm-ui--alert-shown-p))
+        ;; No display to pop up on: the alert itself asks in the minibuffer.
+        (should (lispm-ui-confirm "Delete Ada?" nil "Delete"))
+        (should (equal (car asked) '(choice . "Delete Ada?"))))
+      (let ((lispm-ui-current-palette nil)
+            (lispm-ui-alert-function (lambda (&rest _) t)))
+        (should (lispm-ui--alert-shown-p)))
+      (let ((lispm-ui-alert-function nil)
+            (lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic)))
+        (should-not (lispm-ui--alert-shown-p))))))
+
+(ert-deftest lispm-ui-test-popup-holds-size ()
+  "A popup frame keeps the size it was given as its font changes, when
+Emacs sizes a frame anew to whole lines and columns of the new font, no
+less than its window's minimum: the popup's buffer asks its window for a
+line and a column, not four lines and ten columns, and has its frame
+sized back."
+  (with-temp-buffer
+    (setq-local mode-line-format nil)
+    (lispm-ui-popup-hold-size)
+    (save-window-excursion
+      (set-window-buffer nil (current-buffer))
+      (should (= (window-min-size nil nil nil t) (frame-char-height)))
+      (should (= (window-min-size nil t nil t) (frame-char-width)))))
+  (let ((frame (selected-frame))
+        (text '(80 . 25))
+        (sized nil))
+    (cl-letf (((symbol-function 'set-frame-size)
+               (lambda (_frame width height &optional _pixelwise)
+                 (push (cons width height) sized)
+                 (setq text (cons width height))))
+              ((symbol-function 'frame-text-width) (lambda (&optional _frame) (car text)))
+              ((symbol-function 'frame-text-height) (lambda (&optional _frame) (cdr text))))
+      (unwind-protect
+          (progn
+            ;; A frame `lispm-ui-popup-set-size' never sized is left alone.
+            (lispm-ui-popup--keep-size (selected-window))
+            (should-not sized)
+            (lispm-ui-popup-set-size frame 256 24)
+            (should (equal sized '((256 . 24))))
+            ;; A larger font: Emacs made it whole columns, and four lines.
+            (setq text '(288 . 76) sized nil)
+            (lispm-ui-popup--keep-size (selected-window))
+            (should (equal sized '((256 . 24))))
+            (setq sized nil)
+            (lispm-ui-popup--keep-size (selected-window))
+            (should-not sized))
+        (set-frame-parameter frame 'lispm-ui-popup-size nil)))))
+
+(ert-deftest lispm-ui-test-alert-text ()
+  "An alert shows its message, its detail and a button per choice, framed
+as Mac OS 9 framed its alerts."
+  (let* ((palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+         (lispm-ui-current-palette palette)
+         (buttons '(("Don’t Save" discard nil) ("Cancel" cancel cancel) ("Save" save default)))
+         (svg (lispm-ui-draw-alert palette 'caution "Save?" "Changes will be lost."
+                                   buttons nil nil))
+         (texts (mapcar #'dom-text (dom-by-tag svg 'text))))
+    (should (seq-find (lambda (text) (string-search "Save?" text)) texts))
+    (should (seq-find (lambda (text) (string-search "Changes will be lost." text)) texts))
+    (cl-flet ((at (x y) (lispm-ui-test--pixel svg x y))
+              (color (key) (upcase (plist-get palette key)))
+              (grey (level) (upcase (lispm-ui-grey palette level))))
+      (should (equal (at 0 30) (color :alert)))
+      (should (equal (at 1 30) (grey #xFF)))
+      (should (equal (at 30 1) (grey #xFF)))
+      (should (equal (at 50 40) (grey #xDD)))
+      (should (equal (at (- lispm-ui-alert-width 2) 30) (grey #x99)))
+      (should (equal (at (- lispm-ui-alert-width 1) 30) (color :alert-dark))))
+    (when (fboundp 'libxml-parse-xml-region)
+      ;; The caution sign, embedded.
+      (should (dom-by-tag svg 'path)))))
+
+(ert-deftest lispm-ui-test-alert-layout ()
+  "Don't Save stands apart under the message; Cancel and the default button
+stand at the right, ten pixels apart, the default's ring twelve pixels
+from the edge."
+  (let* ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+         (layout (lispm-ui-alert-layout
+                  "Save changes to the document before closing?" nil
+                  '(("Don’t Save" discard nil) ("Cancel" cancel cancel) ("Save" save default))))
+         (buttons (plist-get layout :buttons))
+         (w lispm-ui-alert-width))
+    (should (equal (mapcar #'cadr buttons) '(discard cancel save)))
+    (pcase-let ((`(,_ ,_ ,_ ,dont ,_ ,_) (nth 0 buttons))
+                (`(,_ ,_ ,_ ,cancel ,_ ,cancel-width) (nth 1 buttons))
+                (`(,_ ,_ ,_ ,save ,_ ,save-width) (nth 2 buttons)))
+      (should (= dont (- lispm-ui-alert-text-x 4)))
+      (should (= (+ save save-width 3) (- w 12)))
+      (should (= (- (- save 3) (+ cancel cancel-width)) lispm-ui-alert-button-gap)))
+    (cl-letf (((symbol-function 'lispm-ui-modal-over)
+               (lambda (event _frame) (event-start event)))
+              ((symbol-function 'frame-parameter) (lambda (&rest _) buttons)))
+      (pcase-let ((`(,_ ,_ ,_ ,x ,y ,_) (nth 1 buttons)))
+        (should (eq (lispm-ui-alert--button-at
+                     (list 'mouse-1 (list (selected-window) 1 (cons (+ x 5) (+ y 5)) 0))
+                     nil)
+                    'cancel))))))
+
+(ert-deftest lispm-ui-test-alert-widens-for-long-words ()
+  "An alert whose buttons' words are too long for Mac OS 9's width, as in
+German, is just wide enough for the button standing apart to keep clear
+of Cancel; one whose words fit keeps the width."
+  (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic)))
+    (cl-letf (((symbol-function 'lispm-ui-push-button-width)
+               (lambda (label) (+ 24 (* 6 (length label))))))
+      (should-not (plist-get (lispm-ui-alert-layout
+                              "Uninstall?" nil '(("Uninstall All" all nil) ("Cancel" cancel cancel)
+                                                 ("Uninstall" item default)))
+                             :width))
+      (let* ((layout (lispm-ui-alert-layout
+                      "„Test“ deinstallieren?" nil
+                      '(("Alles deinstallieren" all nil) ("Abbrechen" cancel cancel)
+                        ("Deinstallieren" item default))))
+             (w (plist-get layout :width))
+             (buttons (plist-get layout :buttons)))
+        (should (> w lispm-ui-alert-width))
+        (pcase-let ((`(,_ ,_ ,_ ,apart ,_ ,apart-width) (nth 0 buttons))
+                    (`(,_ ,_ ,_ ,cancel ,_ ,_) (nth 1 buttons))
+                    (`(,_ ,_ ,_ ,default ,_ ,default-width) (nth 2 buttons)))
+          (should (= (- cancel (+ apart apart-width)) (* 2 lispm-ui-alert-button-gap)))
+          (should (= (+ default default-width 3) (- w 12))))))))
+
+(defmacro lispm-ui-test--with-alert-keys (&rest body)
+  "Run BODY where `lispm-ui-alert-default' reads the events queued in
+`unread-command-events', its popup drawn nowhere.  In BODY, `draws' holds
+the (PRESSED FOCUSED) of each drawing, the latest first."
+  (declare (indent 0))
+  `(let ((draws nil))
+     (cl-letf (((symbol-function 'lispm-ui-popup-available-p) (lambda () t))
+               ((symbol-function 'lispm-ui-alert-open) (lambda (&rest _) 'alert))
+               ((symbol-function 'lispm-ui-alert--draw)
+                (lambda (_frame _icon _message _detail _buttons pressed focused)
+                  (push (list pressed focused) draws)))
+               ((symbol-function 'lispm-ui-popup-dispose) #'ignore)
+               ((symbol-function 'sit-for) #'ignore)
+               ((symbol-function 'redisplay) #'ignore))
+       ,@body)))
+
+(ert-deftest lispm-ui-test-alert-keys ()
+  "An alert answers from the keyboard: Return presses its default button,
+Escape its Cancel, or its default when it has none; Tab and Shift-Tab,
+C-f and C-b move the focus ring from button to button, and Space presses
+the button ringed; a button's own keys press it."
+  (let ((buttons '(("Don’t Save" discard nil ?\M-d) ("Cancel" cancel cancel) ("Save" save default))))
+    (lispm-ui-test--with-alert-keys
+     (cl-flet ((answer (events &optional given)
+                 (let ((unread-command-events events))
+                   (lispm-ui-alert-default 'caution "Save?" (or given buttons)))))
+       (should (eq (answer '(return)) 'save))
+       (should (eq (answer '(?\r)) 'save))
+       (should (eq (answer '(escape)) 'cancel))
+       (should (eq (answer '(?\C-g)) 'cancel))
+       (should (eq (answer '(escape) '(("OK" ok default))) 'ok))
+       (should (eq (answer '(?\M-d)) 'discard))
+       (should (eq (answer '(tab ?\s)) 'discard))
+       (should (eq (answer '(tab tab ?\s)) 'cancel))
+       (should (eq (answer '(?\C-f ?\C-f ?\C-f ?\s)) 'save))
+       (should (eq (answer '(backtab ?\s)) 'save))
+       (should (eq (answer '(?\C-b ?\C-b ?\s)) 'cancel))
+       ;; Space with no button ringed presses nothing.
+       (should (eq (answer '(?\s return)) 'save))
+       ;; C-n and C-p ring the buttons as Tab and Shift-Tab do.
+       (should (eq (answer '(?\C-n ?\s)) 'discard))
+       (should (eq (answer '(?\C-p ?\s)) 'save))
+       (should (eq (answer '(S-iso-lefttab ?\s)) 'save))))))
+
+(ert-deftest lispm-ui-test-alert-fallback-keys ()
+  "An alert asked in the minibuffer has a letter for each button, typed
+without an input method: one of its label, else of its value's name,
+as for labels in Chinese, else a digit.  It is asked there even from a
+timer, where Emacs would pop up a dialog box."
+  (should (equal (lispm-ui--alert-keys '(("Later" later cancel) ("Restart" restart default)))
+                 '((?l "Later" later) (?r "Restart" restart))))
+  (should (equal (lispm-ui--alert-keys '(("Save" save) ("Same" same)))
+                 '((?s "Save" save) (?a "Same" same))))
+  (should (equal (mapcar #'car (lispm-ui--alert-keys
+                                '(("\u7a0d\u540e" later cancel) ("\u91cd\u65b0\u542f\u52a8" restart default))))
+                 '(?l ?r)))
+  (should (equal (mapcar #'car (lispm-ui--alert-keys '(("\u662f" 1) ("\u5426" 2))))
+                 '(?1 ?2)))
+  ;; Asked from a timer, as after an agent's turn, still in the
+  ;; minibuffer, never in a dialog box.
+  (let ((dialog 'unset))
+    (cl-letf (((symbol-function 'read-multiple-choice)
+               (lambda (_prompt choices &rest _) (setq dialog use-dialog-box) (cadr choices))))
+      (let ((use-dialog-box t))
+        (should (eq (lispm-ui--alert-in-minibuffer
+                     "Restart?" '(("Later" later cancel) ("Restart" restart default)) nil 'later)
+                    'restart))))
+    (should-not dialog)))
+
+(ert-deftest lispm-ui-test-tty-alert ()
+  "On a text terminal an alert is laid out in cells: the default button at
+the right, Cancel to its left, a button coming before Cancel standing
+apart under the message, none overlapping, every line as wide."
+  (lispm-ui-test--on-tty
+   (let* ((buttons '(("Don’t Save" discard nil) ("Cancel" cancel cancel) ("Save" save default)))
+          (layout (lispm-ui-alert--text-layout
+                   "Save changes to the document “notes.org” before closing?"
+                   "If you don’t save, your changes will be lost." buttons))
+          (w (plist-get layout :width)))
+     (pcase-let ((`((,_ discard ,_ ,dx ,_ ,dw) (,_ cancel ,_ ,cx ,_ ,cw) (,_ save ,_ ,sx ,_ ,sw))
+                  (plist-get layout :buttons)))
+       (should (= (+ sx sw) (- w 2)))
+       (should (< (+ cx cw) sx))
+       (should (= dx lispm-ui-alert--text-x))
+       (should (< (+ dx dw) cx)))
+     (let ((lines (split-string (lispm-ui-alert--text
+                                 'caution "Save changes?" "Detail." buttons nil 'cancel)
+                                "\n")))
+       (should (seq-every-p (lambda (line) (= (string-width line) lispm-ui-text-alert-width)) lines))
+       (should (string-match-p "\\[ Save \\]" (car (last lines 2))))))))
+
+(defun lispm-ui-test--pixel (svg x y)
+  "Return the colour SVG paints the pixel at X, Y with, upcased, or nil.
+Only rectangles count, the last painted over the pixel winning, as the
+drawing functions draw their pixels as rectangles."
+  (let ((color nil))
+    (dolist (node (dom-children svg))
+      (when (and (consp node) (eq (dom-tag node) 'rect))
+        (let ((x0 (dom-attr node 'x)) (y0 (dom-attr node 'y))
+              (fill (dom-attr node 'fill)))
+          (when (and (numberp x0) (stringp fill) (not (equal fill "none"))
+                     (<= x0 (+ x 0.5) (+ x0 (dom-attr node 'width)))
+                     (<= y0 (+ y 0.5) (+ y0 (dom-attr node 'height))))
+            (setq color (upcase fill))))))
+    color))
+
 ;;;; lispm-ui-form
 
 (defun lispm-ui-test--form-field (key)

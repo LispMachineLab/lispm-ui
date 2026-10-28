@@ -164,7 +164,7 @@ Elsewhere, from git, after LispM Kit, which it requires:
 (package-vc-install "https://github.com/LispMachineLab/lispm-ui")
 #+end_src
 
-An application names it in its =Package-Requires=, as ~(lispm-ui "0.3.0")~, and requires the part
+An application names it in its =Package-Requires=, as ~(lispm-ui "0.4.0")~, and requires the part
 it uses, or ~lispm-ui~ for all of them.
 
 * Testing

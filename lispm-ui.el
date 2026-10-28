@@ -4,7 +4,7 @@
 
 ;; Author: Ryan.K
 ;; URL: https://github.com/LispMachineLab/lispm-ui
-;; Version: 0.2.1
+;; Version: 0.2.2
 ;; Package-Requires: ((emacs "30.1") (lispm-kit "0.2.0"))
 ;; Keywords: convenience, faces, mouse
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
@@ -52,6 +52,9 @@
 ;;                      its controls: push buttons, pop-up menus, bevel
 ;;                      buttons, radio buttons, check boxes and group
 ;;                      boxes, drawn, as strings and in buffers
+;;   lispm-ui-list.el   lists' column headings and disclosure triangles
+;;   lispm-ui-scroll.el scroll bars, drawn
+;;   lispm-ui-window.el windows' title bars, as dialogs draw them
 ;;   lispm-ui-modal.el  what its modal panels share: reading events
 ;;                      without quitting, what each key does, focus
 ;;                      rings, holding a control pressed
@@ -80,6 +83,9 @@
 (require 'lispm-ui-modal)
 (require 'lispm-ui-ask)
 (require 'lispm-ui-controls)
+(require 'lispm-ui-list)
+(require 'lispm-ui-scroll)
+(require 'lispm-ui-window)
 (require 'lispm-ui-form)
 
 (provide 'lispm-ui)

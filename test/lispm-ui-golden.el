@@ -22,10 +22,10 @@
 
 ;;; Commentary:
 
-;; LispM UI's palette, drawing, text, controls and the dressing of its
-;; forms came from LispM Desktop, where they were
-;; lispm-desktop-platinum-*, lispm-desktop-look-*, lispm-desktop-i18n-*
-;; and lispm-desktop-form-*.  What they make, palettes, SVG documents,
+;; LispM UI's palette, drawing, text, controls, the dressing of its
+;; forms, lists' headings, scroll bars and title bars came from LispM
+;; Desktop, where they were lispm-desktop-platinum-*,
+;; lispm-desktop-look-*, lispm-desktop-i18n-* and lispm-desktop-form-*.  What they make, palettes, SVG documents,
 ;; lines and forms as they show, must be what the desktop's made, so
 ;; that the desktop draws the same once it draws with LispM UI.
 ;;
@@ -168,6 +168,30 @@
     (lispm-ui-form-redraw-all . lispm-desktop-form-redraw-all)
     (lispm-ui-form-text-area . lispm-desktop-form-text-area)
     (lispm-ui-form-well-size . lispm-desktop-form-well-size)
+    ;; lispm-ui-list.el
+    (lispm-ui-list-header-height . lispm-desktop-platinum-list-header-height)
+    (lispm-ui-list--sort-glyph . lispm-desktop-platinum--sort-glyph)
+    (lispm-ui-draw-list-header . lispm-desktop-platinum-draw-list-header)
+    (lispm-ui-list--triangle . lispm-desktop-platinum--triangle)
+    (lispm-ui-draw-triangle . lispm-desktop-platinum-draw-triangle)
+    (lispm-ui-triangle . lispm-desktop-platinum-triangle)
+    ;; lispm-ui-scroll.el
+    (lispm-ui-scroll-width . lispm-desktop-platinum-scroll-width)
+    (lispm-ui-scroll-arrow . lispm-desktop-platinum-scroll-arrow)
+    (lispm-ui-scroll--track . lispm-desktop-platinum--scroll-track)
+    (lispm-ui-scroll-layout . lispm-desktop-platinum-scroll-layout)
+    (lispm-ui-scroll-thumb . lispm-desktop-platinum-scroll-thumb)
+    (lispm-ui-scroll--draw-arrow . lispm-desktop-platinum--draw-scroll-arrow)
+    (lispm-ui-draw-scroll-bar . lispm-desktop-platinum-draw-scroll-bar)
+    ;; lispm-ui-window.el
+    (lispm-ui-title-inactive . lispm-desktop-platinum-title-inactive)
+    (lispm-ui-title-bar-height . lispm-desktop-platinum-title-bar-height)
+    (lispm-ui-title-box-size . lispm-desktop-platinum-box-size)
+    (lispm-ui-title-box-margin . lispm-desktop-platinum-box-margin)
+    (lispm-ui-svg-title-ground . lispm-desktop-platinum--draw-title-ground)
+    (lispm-ui-svg-title-ridges . lispm-desktop-platinum--draw-ridges)
+    (lispm-ui-draw-title-part . lispm-desktop-platinum-draw-title-part)
+    (lispm-ui-title-layout . lispm-desktop-platinum-title-layout)
     ;; lispm-ui-base.el
     (lispm-ui-tty-p . lispm-desktop-tty-p)
     ;; lispm-ui-raster.el
@@ -435,7 +459,7 @@ the glyph function gives them: see `lispm-ui-golden--form'."
                              (lispm-ui-svg-content
                               svg (propertize "i" 'display
                                               '(image :type svg :width 16 :height 16
-                                                      :data "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><!-- a box --><rect width=\"16\" height=\"16\" fill=\"#a&amp;b\"/></svg>"))
+                                                      :data "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><!-- a box --><rect width=\"16\" height=\"16\" fill=\"#a&amp;b\"/></svg>"))
                               2 0 24 "#000000" 'lispm-ui-list))))
     (dom (lispm-ui-svg-dom nil "<?xml version=\"1.0\"?><!-- c --><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4 4\"><path d=\"M0 0h4\" title=\"a &lt; b\"/></svg>"))
     (embed
@@ -537,6 +561,59 @@ the glyph function gives them: see `lispm-ui-golden--form'."
     (foreign-form-dressed
      (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
        (lispm-ui-golden--foreign-form #'lispm-ui-form-glyph #'lispm-ui-form-dress)))
+    ;; lispm-ui-list.el
+    (list-headers
+     (list (lispm-ui-golden--print
+            (lispm-ui-draw-list-header (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)
+                                       '(("Name" 150 nil 28) ("Date Modified" 96 t 6))))
+           (lispm-ui-golden--print
+            (lispm-ui-draw-list-header (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)
+                                       '(("Name" 120 t) ("Kind" 80 nil)) 12))
+           lispm-ui-list-header-height))
+    (triangles
+     (let ((classic (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic))
+           (dark (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
+       (list (lispm-ui-golden--print (lispm-ui-draw-triangle classic nil))
+             (lispm-ui-golden--print (lispm-ui-draw-triangle classic t))
+             (lispm-ui-golden--print (lispm-ui-draw-triangle dark t)))))
+    (triangles-as-strings
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (mapcar #'lispm-ui-golden--intervals (list (lispm-ui-triangle t) (lispm-ui-triangle nil)))))
+    ;; lispm-ui-scroll.el
+    (scroll-layouts
+     (list (lispm-ui-scroll-layout 100) (lispm-ui-scroll-layout 300)
+           (lispm-ui-scroll-thumb 400 1 1000 1 1000) (lispm-ui-scroll-thumb 330 1 101 1 1001)
+           (lispm-ui-scroll-thumb 330 901 1001 1 1001) (lispm-ui-scroll-thumb 400 1 2 1 100000)
+           (lispm-ui-scroll-thumb 50 1 2 1 100) (lispm-ui-scroll-thumb 141 3 10 0 12)
+           lispm-ui-scroll-width lispm-ui-scroll-arrow))
+    (scroll-bars
+     (let ((classic (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic))
+           (dark (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
+       (mapcar (pcase-lambda (`(,palette ,height ,thumb ,active))
+                 (lispm-ui-golden--print (lispm-ui-draw-scroll-bar palette height thumb active)))
+               `((,classic 200 (40 . 60) t) (,classic 200 nil t) (,classic 200 (40 . 60) nil)
+                 (,classic 141 (0 . 12) t) (,classic 141 (98 . 12) t) (,dark 300 (0 . 30) t)))))
+    ;; lispm-ui-window.el
+    (title-layouts
+     (list (lispm-ui-title-layout 600 100) (lispm-ui-title-layout 300 1000)
+           (lispm-ui-title-layout 300 1000 '(on nil nil)) (lispm-ui-title-layout 600 100 nil '(12 . 15))
+           (lispm-ui-title-layout 600 100 '(on nil nil) '(12 . 15)) (lispm-ui-title-layout 448 120 '(nil nil nil))
+           (lispm-ui-title-layout 300 100 '(on nil on)) (lispm-ui-title-layout 40 30)
+           lispm-ui-title-bar-height lispm-ui-title-box-size lispm-ui-title-box-margin))
+    (title-parts
+     (let ((classic (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic))
+           (dark (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
+       (list (lispm-ui-golden--print
+              (lispm-ui-draw-title-part classic 448 :active t :lead t :trail t
+                                        :ridges '((7 . 150) (290 . 440)) :label "Choose a Picture"
+                                        :label-x 162))
+             (lispm-ui-golden--print (lispm-ui-draw-title-part classic 200 :label "Away" :label-x 80))
+             (lispm-ui-golden--print (lispm-ui-draw-title-part dark 50 :active t :ridges '((0 . 49))))
+             (lispm-ui-golden--print (lispm-ui-draw-title-part dark 16 :active t :trail t))
+             (lispm-ui-golden--svg 60 21 (lambda (svg)
+                                           (lispm-ui-svg-title-ground svg 4 50 classic nil)
+                                           (lispm-ui-svg-title-ridges svg 10 9 classic)
+                                           (lispm-ui-svg-title-ridges svg 10 40 dark))))))
     ;; lispm-ui-raster.el
     (raster-shapes
      (mapcar (lambda (size) (lispm-ui-raster-dom (lispm-ui-golden--xml ,lispm-ui-golden--shapes) size))
@@ -640,6 +717,9 @@ What they make is written in LispM UI's names, as a face it remaps."
   (require 'lispm-desktop-look)
   (require 'lispm-desktop-i18n)
   (require 'lispm-desktop-form)
+  (require 'lispm-desktop-platinum)
+  (require 'lispm-desktop-platinum-scroll)
+  (require 'lispm-desktop-platinum-titlebar)
   (require 'lispm-desktop-platinum-raster)
   (require 'lispm-desktop-platinum-icons)
   (require 'lispm-ui-base)

@@ -152,7 +152,7 @@ apart from the rest of Emacs."
            (lispm-ui-palette-functions nil)
            (lispm-ui-palette-changed-hook nil)
            (faces (mapcar (lambda (face) (cons face (copy-sequence (face-all-attributes face))))
-                          '(lispm-ui-title lispm-ui-small lispm-ui-field lispm-ui-field-focused
+                          '(lispm-ui-title lispm-ui-title-inactive lispm-ui-small lispm-ui-field lispm-ui-field-focused
                             lispm-ui-button lispm-ui-button-pressed))))
        (cl-letf (((symbol-function 'face-background)
                   (lambda (face &rest _) (and (eq face 'default) content)))
@@ -179,9 +179,15 @@ be read leaves the palette as it was."
       (should (= lispm-ui-palette-generation 1))
       (should (= changed 1))
       (should (equal (face-attribute 'lispm-ui-field :background) "#DDDDDD"))
+      ;; Drawn over a theme's `widget-field', a field takes none of its lines.
+      (dolist (line '(:underline :overline :strike-through))
+        (should (null (face-attribute 'lispm-ui-field line)))
+        (should (null (face-attribute 'lispm-ui-form-area line))))
       (should (equal (plist-get (face-attribute 'lispm-ui-field-focused :box) :color) "#6363CE"))
       (should (equal (face-attribute 'lispm-ui-button :background) (lispm-ui-color :chrome)))
       (should (eq (face-attribute 'lispm-ui-small :inherit) 'lispm-ui-list))
+      (should (equal (face-attribute 'lispm-ui-title-inactive :foreground) (lispm-ui-color :muted)))
+      (should (eq (face-attribute 'lispm-ui-title-inactive :inherit) 'unspecified))
       (setq lispm-ui-palette-functions (list (lambda () '(:chrome "#CCCCCC" :focus "#FF0000"))
                                              (lambda () '(:focus "#00FF00"))))
       (lispm-ui-palette-update)
@@ -217,6 +223,21 @@ above the chrome lean toward its light, those below toward its outline."
     (should (equal (lispm-ui-grey other #xDD) "#404040"))
     (should (equal (lispm-ui-grey other #xFF) "#808080"))
     (should (equal (lispm-ui-grey other #x00) "#000000"))))
+
+(ert-deftest lispm-ui-test-palette-on-black ()
+  "A theme on black has a chrome its controls' dark edges and outlines
+stand out from, lifted toward its text; its content stays black, and a
+theme light enough keeps the chrome its content gives."
+  (let ((palette (lispm-ui-derive-palette "#000000" "#ffffff" "#989898" "#2fafff")))
+    (should (equal (plist-get palette :content) "#000000"))
+    (should (> (lispm-ui-luminance (plist-get palette :chrome))
+               (+ (lispm-ui-luminance (plist-get palette :outline)) 0.05)))
+    (should (> (lispm-ui-luminance (lispm-ui-grey palette #xEE))
+               (+ (lispm-ui-luminance (lispm-ui-grey palette #x00)) 0.1))))
+  (should (equal (plist-get (lispm-ui-derive-palette "#282a36" "#f8f8f2" "#6272a4" "#bd93f9") :chrome)
+                 (lispm-ui-blend "#282a36" "#000000" 0.25)))
+  ;; Colours a text terminal cannot resolve are left to it.
+  (should (equal (lispm-ui--palette-ground "unspecified-bg" "#ffffff") "unspecified-bg")))
 
 ;;;; lispm-ui-look
 
@@ -307,6 +328,42 @@ palette, and apart for each look; the cache is emptied past 512 images."
       (dotimes (i 520) (puthash (list 'filler i) t lispm-ui--images))
       (lispm-ui-image '(dot 2) #'draw)
       (should (= (hash-table-count lispm-ui--images) 1)))))
+
+(ert-deftest lispm-ui-test-svg-named-twice ()
+  "An SVG an editor wrote, an attribute of its own named as one of SVG's
+once the parser drops its namespace, is embedded with each attribute
+once, its own first, so that the picture is still a document."
+  (skip-unless (fboundp 'libxml-parse-xml-region))
+  (let* ((lispm-ui--svg-doms (make-hash-table :test #'equal))
+         (dom (lispm-ui-svg-dom nil (concat "<svg xmlns=\"http://www.w3.org/2000/svg\""
+                                            " xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\""
+                                            " version=\"1.1\" inkscape:version=\"0.48.4\" width=\"4\">"
+                                            "<rect width=\"4\" height=\"4\"/></svg>")))
+         (svg (svg-create 8 8)))
+    (should (equal (seq-filter (lambda (attribute) (eq (car attribute) 'version)) (dom-attributes dom))
+                   '((version . "1.1"))))
+    (lispm-ui-svg-embed svg dom 0 0 8 8)
+    (with-temp-buffer
+      (svg-print svg)
+      (should (= (how-many "version=" (point-min) (point-max)) 2))
+      (should (libxml-parse-xml-region (point-min) (point-max))))))
+
+(ert-deftest lispm-ui-test-svg-scaled ()
+  "An SVG sized in pixels without a viewBox, embedded smaller or larger, is
+scaled to fit, not cut; one of its own size, or with a viewBox, or sized
+in other units, is embedded as it is."
+  (skip-unless (fboundp 'libxml-parse-xml-region))
+  (let ((lispm-ui--svg-doms (make-hash-table :test #'equal)))
+    (cl-flet ((embedded (source width height)
+                (let ((svg (svg-create 64 64)))
+                  (lispm-ui-svg-embed svg (lispm-ui-svg-dom nil source) 0 0 width height)
+                  (dom-attr (car (dom-children svg)) 'viewBox))))
+      (should (equal (embedded "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"333\" height=\"233px\"/>" 64 64)
+                     "0 0 333 233"))
+      (should-not (embedded "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"/>" 16 16))
+      (should (equal (embedded "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"40\" viewBox=\"0 0 4 4\"/>" 64 64)
+                     "0 0 4 4"))
+      (should-not (embedded "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10mm\" height=\"10mm\"/>" 64 64)))))
 
 ;;;; lispm-ui-raster
 
@@ -674,6 +731,101 @@ the focus colour."
         (should (equal (plist-get (get-text-property 0 'face focused) :background)
                        (lispm-ui-color :focus)))))))
 
+;;;; lispm-ui-list
+
+(ert-deftest lispm-ui-test-list-header ()
+  "A list's headings are as wide as their columns and the sort-direction
+button; a disclosure triangle is an image, or a character on a text
+terminal, pointing down when open."
+  (lispm-ui-test--with-controls
+    (let ((header (lispm-ui-draw-list-header lispm-ui-current-palette
+                                             '(("Name" 150 nil 28) ("Date Modified" 96 t 6)))))
+      (should (equal (dom-attr header 'width) 262))
+      (should (equal (dom-attr header 'height) lispm-ui-list-header-height)))
+    (should (eq (car (get-text-property 0 'display (lispm-ui-triangle t))) 'image))
+    (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&rest _) t)))
+      (should (equal (lispm-ui-triangle t) "▾"))
+      (should (equal (lispm-ui-triangle nil) "▸")))))
+
+;;;; lispm-ui-scroll
+
+(ert-deftest lispm-ui-test-scroll-thumb ()
+  "The thumb is as long as the share shown, and as far down as the start;
+the arrows take the bar's bottom.  Everything shown, or a track too
+short, has no thumb."
+  (let ((arrows (1+ (* 2 lispm-ui-scroll-arrow))))
+    (should-not (lispm-ui-scroll-thumb 400 1 1000 1 1000))
+    (should-not (lispm-ui-scroll-thumb (+ 24 arrows) 1 2 1 100))
+    (should (equal (lispm-ui-scroll-thumb (+ 300 arrows) 1 101 1 1001) '(0 . 30)))
+    (pcase-let ((`(,top . ,length) (lispm-ui-scroll-thumb (+ 300 arrows) 901 1001 1 1001)))
+      (should (= (+ top length) 300)))
+    ;; A short thumb is never shorter than an arrow's box.
+    (should (= (cdr (lispm-ui-scroll-thumb 400 1 2 1 100000)) 16))
+    (let ((layout (lispm-ui-scroll-layout (+ 300 arrows))))
+      (should (= (plist-get layout :track-length) 300))
+      (should (= (plist-get layout :up) 300))
+      (should (= (plist-get layout :down) (+ 300 lispm-ui-scroll-arrow))))))
+
+(ert-deftest lispm-ui-test-scroll-bar-drawn-by-look ()
+  "A scroll bar is drawn in the look in use: its own method, where it has
+one, before the classic look's."
+  (let ((palette (lispm-ui-derive-palette "#DDDDDD" "#000000" "#777777" "#6363CE"))
+        (lispm-ui-looks nil))
+    (lispm-ui-look-define 'test-flat :family 'test-flat)
+    (cl-defmethod lispm-ui-scroll-layout (height &context (lispm-ui-look (lispm-ui-look-family test-flat)))
+      (plist-put (cl-call-next-method) :track 16))
+    (let ((lispm-ui-look 'test-flat))
+      (should (= (plist-get (lispm-ui-scroll-layout 100) :track) 16)))
+    (should (= (plist-get (lispm-ui-scroll-layout 100) :track) 0))
+    (dolist (thumb '((40 . 30) nil))
+      (dolist (active '(t nil))
+        (let ((bar (lispm-ui-draw-scroll-bar palette 300 thumb active)))
+          (should (equal (dom-attr bar 'width) lispm-ui-scroll-width))
+          (should (equal (dom-attr bar 'height) 300)))))))
+
+;;;; lispm-ui-window
+
+(ert-deftest lispm-ui-test-title-layout ()
+  "A short title sits in the middle of its bar, ridges either side, the
+boxes spaced as Mac OS 9 spaced them; a title too wide is narrowed,
+keeping ridges either side; a bar lacking boxes gives their room to the
+title; margins stand the boxes nearest the ends that far in."
+  (let* ((s lispm-ui-title-box-size)
+         (margin lispm-ui-title-box-margin)
+         (layout (lispm-ui-title-layout 600 100)))
+    (should (= (plist-get layout :title) 100))
+    (should (= (plist-get layout :label-x) 250))
+    (should (= (plist-get layout :start) (+ 3 s)))
+    (should (= (car (nth 0 (plist-get layout :ridges))) (+ 3 s 4)))
+    (should (= (plist-get layout :end) (- 600 3 s 3 s)))
+    (pcase-let* ((long (lispm-ui-title-layout 300 1000))
+                 (`((,a . ,b) (,c . ,d)) (plist-get long :ridges)))
+      (should (< (plist-get long :title) 300))
+      (should (>= (- b a) 12))
+      (should (>= (- d c) 12))
+      (should (> (plist-get (lispm-ui-title-layout 300 1000 '(on nil nil)) :title)
+                 (plist-get long :title))))
+    (let ((dialog (lispm-ui-title-layout 448 100 '(nil nil nil))))
+      (should (= (plist-get dialog :start) 0))
+      (should (= (plist-get dialog :end) (- 448 margin)))
+      (should (= (plist-get dialog :label-x) 174)))
+    (let ((wide (lispm-ui-title-layout 600 100 nil '(12 . 15))))
+      (should (equal (plist-get wide :margins) '(12 . 15)))
+      (should (= (plist-get wide :start) (+ 12 s))))))
+
+(ert-deftest lispm-ui-test-title-part ()
+  "A stretch of title bar is as tall as a title bar; active, it is lit
+along its top over the content's black line, and its label is drawn in
+the titles' face; inactive, its label is greyed."
+  (let* ((palette (lispm-ui-derive-palette "#DDDDDD" "#000000" "#777777" "#6363CE"))
+         (active (lispm-ui-draw-title-part palette 200 :active t :ridges '((10 . 60)) :label "Choose"
+                                           :label-x 80 :lead t :trail t))
+         (inactive (lispm-ui-draw-title-part palette 200 :label "Choose" :label-x 80)))
+    (should (equal (dom-attr active 'height) lispm-ui-title-bar-height))
+    (should (equal (dom-attr (car (dom-by-tag active 'text)) 'fill) (plist-get palette :text)))
+    (should (equal (dom-attr (car (dom-by-tag inactive 'text)) 'fill) (lispm-ui-grey palette #x77)))
+    (should (< (length (dom-by-tag inactive 'rect)) (length (dom-by-tag active 'rect))))))
+
 ;;;; lispm-ui-modal
 
 (ert-deftest lispm-ui-test-modal-key-roles ()
@@ -977,6 +1129,15 @@ title goes where the window shows it instead."
               ;; Typed in, it is shaped again.
               (lispm-ui-test--form-type 'notes "a\nb")
               (should (= (length (widget-get area :lispm-form-pads)) 3)))
+            ;; A check box's long text widens it, half as wide again at most.
+            (dolist (case `((10 . 0) (,(+ lispm-ui-form-width 4) . 8) (,(* 2 lispm-ui-form-width) . 17)))
+              (let ((buffer (lispm-ui-form "Pet" `((long :type check :text ,(make-string (car case) ?x))))))
+                (unwind-protect
+                    (with-current-buffer buffer
+                      (should (= (plist-get lispm-ui-form--geometry :right)
+                                 (+ (plist-get lispm-ui-form--geometry :control) lispm-ui-form-width
+                                    (min (cdr case) (/ lispm-ui-form-width 2))))))
+                  (kill-buffer buffer))))
             ;; Shown where its window is titled with it, it shows no title.
             (setq lispm-ui-form-show-header nil)
             (lispm-ui-form-redraw)
@@ -1075,6 +1236,302 @@ point while point is in it, and its start once point has left it."
           (should (plist-get (lispm-ui-form-geometry buffer) :right))
           (with-current-buffer buffer
             (should (equal (lispm-ui-form-title) "Pet"))))
+      (kill-buffer buffer))))
+
+(defun lispm-ui-test--form-text (key)
+  "The text the field KEY of the form in this buffer holds, as it is shown."
+  (let ((field (alist-get key lispm-ui-form--widgets)))
+    (buffer-substring-no-properties (widget-field-start field) (widget-field-text-end field))))
+
+(ert-deftest lispm-ui-test-form-password ()
+  "A password is typed into a field showing stars, never its text, drawn
+again too; its value is what was typed, a star or a blank in it kept,
+the line break of a paste taken out."
+  (let* ((submitted nil)
+         (buffer (lispm-ui-form "Account" '((user :type text :label "User")
+                                            (password :type password :label "Password"))
+                                :values '((password . "old"))
+                                :on-submit (lambda (values) (setq submitted values)))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should (memq 'password lispm-ui-form-types))
+          (should (equal (lispm-ui-test--form-text 'password) "***"))
+          ;; As wide as a text field, its padding one blank.
+          (let ((field (alist-get 'password lispm-ui-form--widgets)))
+            (should (equal (get-text-property (1- (widget-field-end field)) 'display)
+                           `(space :align-to (,(plist-get lispm-ui-form--geometry :right))))))
+          (should (string-match-p "Password: \\*\\*\\*" (buffer-string)))
+          (should (equal (lispm-ui-form-value 'password) "old"))
+          (let ((field (alist-get 'password lispm-ui-form--widgets)))
+            (delete-region (widget-field-start field) (widget-field-text-end field)))
+          (lispm-ui-test--form-type 'password " a*b\nc")
+          (should (equal (lispm-ui-form-value 'password) " a*bc"))
+          (should (equal (lispm-ui-test--form-text 'password) "*****"))
+          (lispm-ui-form-redraw)
+          (should (equal (lispm-ui-test--form-text 'password) "*****"))
+          (should (equal (widget-value (alist-get 'password lispm-ui-form--widgets)) " a*bc"))
+          (lispm-ui-test--form-type 'user "me")
+          (lispm-ui-form-submit)
+          (should (equal submitted '((user . "me") (password . " a*bc")))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest lispm-ui-test-form-on-change ()
+  "A field's :on-change is called with its value each time it is changed,
+and may change the others: the form is drawn again once a text's change
+is done, at once after a choice; `lispm-ui-form-set' from elsewhere draws
+it again at once."
+  (let* ((changes nil)
+         (drawn 0)
+         (lispm-ui-form-drawn-hook (list (lambda () (cl-incf drawn))))
+         (buffer (lispm-ui-form
+                  "Server"
+                  `((address :type text :label "Address"
+                             :on-change ,(lambda (value)
+                                           (push (cons 'address value) changes)
+                                           (when (equal value "a@b")
+                                             (lispm-ui-form-set 'host "mail.b"))))
+                    (host :type text :label "Server")
+                    (security :type choice :label "Security"
+                              :choices ((tls . "SSL/TLS") (none . "None")) :value tls
+                              :on-change ,(lambda (value)
+                                            (push (cons 'security value) changes)
+                                            (lispm-ui-form-set 'port (if (eq value 'tls) "993" "143"))))
+                    (port :type text :label "Port" :value "993")
+                    (keep :type check :text "Keep"
+                          :on-change ,(lambda (value) (push (cons 'keep value) changes)))))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should (= drawn 1))
+          (lispm-ui-test--form-type 'address "a@")
+          (should (equal changes '((address . "a@"))))
+          (lispm-ui-test--form-type 'address "b")
+          (should (equal (car changes) '(address . "ba@")))
+          (let ((field (alist-get 'address lispm-ui-form--widgets)))
+            (delete-region (widget-field-start field) (widget-field-text-end field)))
+          (lispm-ui-test--form-type 'address "a@b")
+          (should (equal (car changes) '(address . "a@b")))
+          ;; Not drawn while the text is being changed: once it is done.
+          (should (= drawn 1))
+          (should lispm-ui-form--stale)
+          (should (equal (lispm-ui-form-value 'host) "mail.b"))
+          (should (lispm-ui-test--wait (lambda () (not lispm-ui-form--stale))))
+          (should (= drawn 2))
+          (should (equal (widget-value (alist-get 'host lispm-ui-form--widgets)) "mail.b"))
+          (should (equal (lispm-ui-form-value 'address) "a@b"))
+          ;; A choice is drawn again once, with what its :on-change set.
+          (let ((lispm-ui-form-choose-function (lambda (&rest _) '(none))))
+            (lispm-ui-test--form-press 'security))
+          (should (equal (car changes) '(security . none)))
+          (should (= drawn 3))
+          (should (equal (widget-value (alist-get 'port lispm-ui-form--widgets)) "143"))
+          (should-not lispm-ui-form--stale)
+          (lispm-ui-test--form-press 'keep)
+          (should (equal (car changes) '(keep . t)))
+          ;; From elsewhere, as a reply come back, it is drawn again at
+          ;; once, once for all it sets.
+          (lispm-ui-form-set 'host "imap.b" 'port "995")
+          (should (= drawn 5))
+          (should (equal (widget-value (alist-get 'host lispm-ui-form--widgets)) "imap.b"))
+          (should (equal (widget-value (alist-get 'port lispm-ui-form--widgets)) "995")))
+      (kill-buffer buffer))
+    (with-temp-buffer
+      (should-error (lispm-ui-form-set 'host "x") :type 'user-error))))
+
+(ert-deftest lispm-ui-test-form-keys-in-fields ()
+  "The form's keys work in its text fields and text areas too, as C-c C-c
+and those of a mode of its own, while what is typed there goes in."
+  (let ((buffer (lispm-ui-form "Pet" '((name :type text :label "Name")
+                                       (secret :type password :label "Secret")
+                                       (notes :type text-area :label "Notes" :lines 2)
+                                       (kind :type choice :label "Kind" :choices ((cat . "Cat")))))))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (dolist (key '(name secret notes kind))
+            (lispm-ui-test--form-field key)
+            (should (eq (key-binding (kbd "C-c C-c")) #'lispm-ui-form-submit))
+            (should (eq (key-binding (kbd "C-c C-k")) #'lispm-ui-form-cancel))
+            (should (eq (key-binding (kbd "TAB")) #'widget-forward)))
+          (lispm-ui-test--form-field 'name)
+          (should (eq (key-binding (kbd "C-k")) #'widget-kill-line))
+          (should (eq (key-binding "a") #'self-insert-command))
+          ;; The last line of a text area too.
+          (let ((area (alist-get 'notes lispm-ui-form--widgets)))
+            (goto-char (1- (widget-field-end area)))
+            (should (eq (key-binding (kbd "C-c C-c")) #'lispm-ui-form-submit))))
+      (kill-buffer buffer))))
+
+(defvar-local lispm-ui-test--settings-note nil
+  "What the settings of `lispm-ui-test-form-instant' say, set before they are drawn.")
+
+(define-derived-mode lispm-ui-test-settings-mode lispm-ui-form-mode "Settings"
+  "Settings, a form of a mode of its own, for `lispm-ui-test-form-instant'.")
+
+(ert-deftest lispm-ui-test-form-instant ()
+  "A form applying its changes at once has no Cancel button, and a button
+closing it only when it names one; C-c C-c and C-c C-k close it.  It
+may be put in a mode of its own, derived from the form's, and set up in
+its buffer before it is drawn."
+  (let* ((closed nil)
+         (fields `((wrap :type check :text "Wrap lines"
+                         :help ,(lambda (_) lispm-ui-test--settings-note))))
+         (make (lambda (&rest more)
+                 (apply #'lispm-ui-form "Settings" fields :instant t
+                        :mode #'lispm-ui-test-settings-mode
+                        :setup (lambda () (setq lispm-ui-test--settings-note "Long lines wrap."))
+                        :on-submit (lambda (_) (push 'submit closed))
+                        :on-cancel (lambda () (push 'cancel closed))
+                        more))))
+    (let ((buffer (funcall make)))
+      (with-current-buffer buffer
+        (should (eq major-mode 'lispm-ui-test-settings-mode))
+        (should (string-match-p "Long lines wrap\\." (buffer-string)))
+        (should (string-match-p "changes take effect at once · C-c C-c closes" (buffer-string)))
+        (should-not (string-match-p "Cancel\\|OK" (buffer-string)))
+        (should-not (seq-filter (lambda (widget) (eq (car-safe (widget-get widget :lispm-form-control)) 'button))
+                                (lispm-ui-test--form-buttons)))
+        (lispm-ui-form-cancel))
+      (should-not (buffer-live-p buffer)))
+    (let ((buffer (funcall make :submit "Done")))
+      (with-current-buffer buffer
+        (should (equal (delq nil (mapcar (lambda (widget) (widget-get widget :lispm-form-control))
+                                         (lispm-ui-test--form-buttons)))
+                       '(check (button default "Done"))))
+        (lispm-ui-form-submit))
+      (should-not (buffer-live-p buffer)))
+    (should (equal closed '(submit cancel))))
+  (should-error (lispm-ui-form "Settings" nil :mode #'fundamental-mode)))
+
+(ert-deftest lispm-ui-test-form-rows ()
+  "A list of things is drawn a row each: its columns lined up, the last
+cut to the room its buttons leave, which stand at the right and do what
+each says; a help under a row; what the field says when there are none.
+It is asked again each time the form is drawn, and has no value."
+  (let* ((pressed nil)
+         (rows (list (list :text (list "Home" "me@home.example")
+                           :buttons `(("Edit…" . ,(lambda () (push 'edit-home pressed)))
+                                      ("Remove" . ,(lambda () (push 'remove-home pressed)))))
+                     (list :text (list "Work account" (concat "me@work.example · default " (make-string 80 ?x)))
+                           :help (propertize "Not answering" 'face 'error)
+                           :buttons `(("Edit…" . ,(lambda () (push 'edit-work pressed)))
+                                      ("Remove" . ,(lambda () (push 'remove-work pressed)))))))
+         (submitted nil)
+         (lispm-ui-form-width 60)
+         (buffer (lispm-ui-form "Accounts"
+                                `((accounts :type rows :rows ,(lambda (_values) rows) :empty "No account yet")
+                                  (name :type text :label "Name")
+                                  (more :type rows :label "More" :rows ((:text "Only one")))
+                                  (sign-in :type rows :label "Sign in"
+                                           :rows ((:buttons (("Sign In…" . ignore))) (:text "Signed in"))))
+                                :on-submit (lambda (values) (setq submitted values)))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should (memq 'rows lispm-ui-form-types))
+          (let ((text (buffer-string))
+                (geometry lispm-ui-form--geometry))
+            (should (string-match-p "Home +me@home\\.example +\\[Edit…\\] \\[Remove\\]$" text))
+            (should (string-match-p "Work account +me@work\\.example · default x+… +\\[Edit…\\] \\[Remove\\]$" text))
+            ;; The help is in its own face beneath the help's.
+            (goto-char (point-min))
+            (search-forward "Not answering")
+            (should (equal (get-text-property (1- (point)) 'face) '(error lispm-ui-form-help)))
+            ;; Without a label, a list starts where the labels do; with
+            ;; one, where the controls do; its columns are lined up.
+            (cl-flet ((at (text)
+                        (goto-char (point-min))
+                        (search-forward text)
+                        (plist-get (cdr (get-text-property (- (point) (length text) 1) 'display))
+                                   :align-to)))
+              (should (equal (at "Home") (list (plist-get geometry :start))))
+              (should (equal (at "Work account") (list (plist-get geometry :start))))
+              (should (equal (at "me@home") (at "me@work")))
+              (should (equal (at "Only one") (list (plist-get geometry :control))))
+              ;; A row of buttons alone has them where its text would be.
+              (should (equal (at "[Sign In…]") (list (plist-get geometry :control))))
+              (should (equal (at "Signed in") (list (plist-get geometry :control)))))
+            ;; The form widened to hold its rows, half as wide again at most.
+            (should (= (plist-get geometry :right)
+                       (+ (plist-get geometry :control) (/ (* 3 60 (plist-get geometry :em)) 2))))
+            ;; What is cut fits before the buttons.
+            (goto-char (point-min))
+            (search-forward "x…")
+            (should (<= (lispm-ui-form--measure (buffer-substring (line-beginning-position) (point)))
+                        (- (plist-get geometry :right)
+                           (lispm-ui-form--buttons-width (plist-get (cadr rows) :buttons))
+                           (plist-get geometry :em)))))
+          ;; It starts at its first button, each a button of the field.
+          (lispm-ui-form--first-field)
+          (should (eq (lispm-ui-form--key-at (point)) 'accounts))
+          (dotimes (n 4) (lispm-ui-test--form-press 'accounts n))
+          (should (equal pressed '(remove-work edit-work remove-home edit-home)))
+          ;; Asked again when drawn: none left, it says so.
+          (setq rows nil)
+          (lispm-ui-form-redraw)
+          (should (string-match-p "^ No account yet$" (buffer-string)))
+          (lispm-ui-form-submit)
+          (should (equal submitted '((name)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest lispm-ui-test-form-status ()
+  "A status is said again where it stands, of one line or several, the
+rest of the form left as it is: what is being typed, where point is,
+its buttons, another status after it; those who dress it are told.
+Not shown, it is kept for when it is."
+  (let* ((drawn 0)
+         (tested 0)
+         (lispm-ui-form-drawn-hook (list (lambda () (cl-incf drawn))))
+         (lispm-ui-form-group-function
+          (lambda (part &rest args) (pcase part ('top (format "[%s]" (cadr args))) ('bottom "[end]") ('side "|"))))
+         (buffer (lispm-ui-form
+                  "Server"
+                  `((address :type text :label "Address")
+                    (connection :type heading :label "Connection")
+                    (status :type status :label "Status" :value "Not tested yet." :help "Both\nservers.")
+                    (also :type status :label "Also" :value "One")
+                    (hidden :type status :label "Hidden" :when ,(lambda (_) nil))
+                    (test :type buttons :buttons (("Test" . ,(lambda () (cl-incf tested)))))))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should (memq 'status lispm-ui-form-types))
+          (should (string-match-p "^ | Status: Not tested yet\\. *|\n | *Both *|\n | *servers\\. *|\n | Also: One *|$"
+                                  (buffer-string)))
+          (lispm-ui-test--form-type 'address "imap.exam")
+          (let ((field (alist-get 'address lispm-ui-form--widgets))
+                (here (point)))
+            (lispm-ui-form-set 'status (concat (propertize "●" 'face 'success) " Incoming: logged in\n"
+                                               "● Outgoing: refused"))
+            (should (= drawn 2))
+            ;; Not drawn again: its fields and point are as they were.
+            (should (eq (alist-get 'address lispm-ui-form--widgets) field))
+            (should (= (point) here))
+            (should (string-match-p (concat "^ | Status: ● Incoming: logged in *|\n | *● Outgoing: refused *|\n"
+                                            " | *Both *|\n | *servers\\. *|\n | Also: One *|$")
+                                    (buffer-string)))
+            (goto-char (point-min))
+            (search-forward "●")
+            (should (eq (get-text-property (1- (point)) 'face) 'success))
+            (goto-char here)
+            (insert "ple.com")
+            (should (equal (lispm-ui-form-value 'address) "imap.example.com"))
+            (lispm-ui-form-set 'also "Two")
+            (lispm-ui-form-set 'status "Logging in…")
+            (should (string-match-p "^ | Status: Logging in… *|\n | *Both *|\n | *servers\\. *|\n | Also: Two *|$"
+                                    (buffer-string)))
+            (should (equal (lispm-ui-form-value 'address) "imap.example.com"))
+            (lispm-ui-test--form-press 'test)
+            (should (= tested 1))
+            ;; Not shown, it is kept.
+            (lispm-ui-form-set 'hidden "Later")
+            (should (equal (lispm-ui-form-value 'hidden) "Later"))
+            (should-not (string-match-p "Later" (buffer-string)))
+            ;; A status is said, not given.
+            (should (equal (lispm-ui-form-values) '((address . "imap.example.com"))))
+            ;; Wider than the form, it widens the form, drawn anew.
+            (let ((right (plist-get lispm-ui-form--geometry :right)))
+              (lispm-ui-form-set 'status (make-string (+ lispm-ui-form-width 10) ?x))
+              (should (> (plist-get lispm-ui-form--geometry :right) right))
+              (should (string-match-p "Status: x+ *|$" (buffer-string)))
+              (should (equal (lispm-ui-form-value 'address) "imap.example.com")))))
       (kill-buffer buffer))))
 
 (defconst lispm-ui-test--classic '("#DDDDDD" "#000000" "#777777" "#6363CE")
@@ -1269,17 +1726,33 @@ choices, completion; a file, `read-file-name', never in a dialog box."
 its answer is the answer; a question to agree to is an alert, Cancel
 beside the default button its ACTION names."
   (let* ((called nil)
-         (lispm-ui-alert-function (lambda (&rest args) (push (cons 'alert args) called) t))
+         (lispm-ui-alert-function
+          (lambda (&rest args)
+            (push (cons 'alert args) called)
+            (nth 1 (seq-find (lambda (button) (eq (nth 2 button) 'default)) (nth 2 args)))))
          (lispm-ui-choose-function (lambda (&rest args) (push (cons 'choose args) called) '(big)))
          (lispm-ui-choose-file-function (lambda (&rest args) (push (cons 'file args) called) "/tmp/ada.png")))
-    (should (eq (lispm-ui-alert 'note "Done." '(("OK" ok default))) t))
+    (should (eq (lispm-ui-alert 'note "Done." '(("OK" ok default))) 'ok))
     (should (lispm-ui-confirm "Delete Ada?" nil "Delete"))
-    (should (equal (car called) '(alert caution "Delete Ada?" (("Cancel" nil cancel) ("Delete" t default)) nil)))
+    (should (equal (car called) '(alert caution "Delete Ada?" (("Cancel" cancel cancel) ("Delete" agree default))
+                                        nil)))
     (should (equal (lispm-ui-choose '((big . "Big")) nil 1 "Size") '(big)))
     (should (equal (car called) '(choose ((big . "Big")) nil 1 "Size")))
     (should (equal (lispm-ui-choose-file :title "Choose a Picture" :directory "/tmp/" :preview t) "/tmp/ada.png"))
     (should (equal (car called) '(file :title "Choose a Picture" :file nil :directory "/tmp/"
                                        :predicate nil :preview t)))))
+
+(ert-deftest lispm-ui-test-confirm-escape ()
+  "Escape never agrees to a question: its Cancel is worth something, as an
+alert taking a Cancel worth nil for none is dismissed by its default."
+  (let* ((lispm-ui-alert-function
+          (lambda (_icon _message buttons _detail)
+            ;; Escape, as an alert with no Cancel is dismissed by its default.
+            (let ((value (lambda (role) (nth 1 (seq-find (lambda (button) (eq (nth 2 button) role))
+                                                         buttons)))))
+              (or (funcall value 'cancel) (funcall value 'default))))))
+    (should-not (lispm-ui-confirm "Throw this note away?" "Its text will be lost." "Throw Away"))
+    (should-not (lispm-ui-confirm "Delete Ada?"))))
 
 ;;;; lispm-ui-i18n
 

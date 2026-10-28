@@ -64,9 +64,13 @@ A form is written as data, a title and its fields, and drawn as a dialog with Em
 
 Fields are of the types ~lispm-ui-form-types~ lists: text, text areas, pictures, pop-up menus,
 radio buttons, check boxes, rows of buttons and headings that start a group.  =TAB= goes from field
-to field, =C-c C-c= submits, =C-c C-k= cancels.  Whatever shows a form may dress it: see the
-Commentary of =lispm-ui-form.el=.  A program written for LispM's forms before they moved here,
-which requires ~lispm-form~, finds them by their former names.
+to field, =C-c C-c= submits, =C-c C-k= cancels.  Once LispM UI has a palette, a form is dressed
+in its look: its buttons, check boxes, radio buttons and pop-up menus are LispM UI's controls, its
+groups framed in group boxes, its fields in the content's colour on the chrome's ground, and what the
+keyboard is on ringed in the focus colour; without one it is drawn as text.  An application drawing a form with
+Emacs's widgets itself has it dressed the same with ~lispm-ui-form-dress~, and whatever shows a
+form may dress it otherwise: see the Commentary of =lispm-ui-form.el=.  A program written for
+LispM's forms before they moved here, which requires ~lispm-form~, finds them by their former names.
 
 * Asking a person
 
@@ -111,8 +115,8 @@ it uses, or ~lispm-ui~ for all of them.
 with a checkout of LispM Kit beside this one, or where =LISPM_KIT= says.
 =make i18n= lists the messages each catalog lacks, and those it holds that the code no longer
 gives.  The palettes, drawings and lines LispM UI makes are those LispM's desktop made before
-they moved here, which =test/golden.eld= keeps: =make golden LISPM_DESKTOP=…= writes it again from a
-checkout of the desktop from then (see =test/lispm-ui-golden.el=).  =make gallery= draws every
+they moved here, which =test/golden.eld= keeps: =make golden LISPM_DESKTOP=… LISPM_AGENT=…= writes
+it again from a checkout of the desktop from then and LispM's agent (see =test/lispm-ui-golden.el=).  =make gallery= draws every
 control in each of its states, light and dark, in =gallery/=, with =gallery/index.html= to look at
 them in a browser.
 

@@ -22,21 +22,24 @@
 
 ;;; Commentary:
 
-;; LispM UI's palette, drawing and text came from LispM Desktop, where
-;; they were lispm-desktop-platinum-*, lispm-desktop-look-* and
-;; lispm-desktop-i18n-*.  What they make, palettes, SVG documents and
-;; lines, must be what the desktop's made, so that the desktop draws the
-;; same once it draws with LispM UI.
+;; LispM UI's palette, drawing, text, controls and the dressing of its
+;; forms came from LispM Desktop, where they were
+;; lispm-desktop-platinum-*, lispm-desktop-look-*, lispm-desktop-i18n-*
+;; and lispm-desktop-form-*.  What they make, palettes, SVG documents,
+;; lines and forms as they show, must be what the desktop's made, so
+;; that the desktop draws the same once it draws with LispM UI.
 ;;
 ;; `lispm-ui-golden-cases' are written in LispM UI's names.
 ;; `lispm-ui-golden-write' evaluates each in the desktop's names, by
 ;; `lispm-ui-golden-names', in a desktop checkout from before the move,
-;; and writes what they make to test/golden.eld:
+;; and writes what they make to test/golden.eld, in LispM UI's names:
 ;;
-;;   make golden LISPM_DESKTOP=../lispm-desktop/lisp
+;;   make golden LISPM_DESKTOP=../lispm-desktop/lisp LISPM_AGENT=../lisp_machine/lisp
 ;;
-;; with LispM Desktop at 42a18a9, its last commit drawing on its own, and
-;; LispM UI on the load path, whose modal kit it requires.  The
+;; with LispM Desktop at 42a18a9, its last commit drawing on its own,
+;; LispM's agent, which it requires, and LispM UI on the load path,
+;; whose modal kit and forms it requires: a form is drawn by LispM UI's
+;; own code either way, dressed by the desktop's or by LispM UI's.  The
 ;; tests evaluate the same cases in LispM UI's names and find the same.
 ;; Whatever depends on the fonts installed is drawn with none, so that
 ;; any computer makes the same.
@@ -146,7 +149,25 @@
     (lispm-ui-svg-popup-arrows . lispm-desktop-platinum-svg-popup-arrows)
     (lispm-ui-svg-push-button . lispm-desktop-platinum-svg-push-button)
     (lispm-ui-text-button . lispm-desktop-platinum-text-button)
-    (lispm-ui-text-control . lispm-desktop-platinum-text-control))
+    (lispm-ui-text-control . lispm-desktop-platinum-text-control)
+    ;; lispm-ui-form.el, its dressing
+    (lispm-ui-form--control-at . lispm-desktop-form--control-at)
+    (lispm-ui-form--faces . lispm-desktop-form--faces)
+    (lispm-ui-form--field-overlay . lispm-desktop-form--field-overlay)
+    (lispm-ui-form--focus . lispm-desktop-form--focus)
+    (lispm-ui-form--follow . lispm-desktop-form--follow)
+    (lispm-ui-form--image . lispm-desktop-form--image)
+    (lispm-ui-form--remaps . lispm-desktop-form--remaps)
+    (lispm-ui-form--show . lispm-desktop-form--show)
+    (lispm-ui-form--text-areas . lispm-desktop-form--text-areas)
+    (lispm-ui-form--well . lispm-desktop-form--well)
+    (lispm-ui-form-control-properties . lispm-desktop-form-control-properties)
+    (lispm-ui-form-dress . lispm-desktop-form-dress)
+    (lispm-ui-form-glyph . lispm-desktop-form-glyph)
+    (lispm-ui-form-group . lispm-desktop-form-group)
+    (lispm-ui-form-redraw-all . lispm-desktop-form-redraw-all)
+    (lispm-ui-form-text-area . lispm-desktop-form-text-area)
+    (lispm-ui-form-well-size . lispm-desktop-form-well-size))
   "LispM UI's names of what moved from LispM Desktop, (NEW . OLD) each:
 the renames LispM Desktop makes, the other way round.")
 
@@ -170,19 +191,116 @@ function of the document."
   "Return the SVG text of SVG, a document of svg.el's."
   (with-temp-buffer (svg-print svg) (buffer-string)))
 
-(defun lispm-ui-golden--intervals (string)
+(defun lispm-ui-golden--image (image)
+  "Return IMAGE by its SVG text, or IMAGE itself when it is no image: an
+Emacs without SVG makes the image otherwise, of the same text."
+  (if (eq (car-safe image) 'image)
+      (list 'svg (plist-get (cdr image) :data))
+    image))
+
+(defun lispm-ui-golden--intervals (string &optional only)
   "Return STRING with its properties, which `equal' alone ignores, an image
-it displays by its SVG text: an Emacs without SVG makes the image
-otherwise, of the same text."
-  (cons (substring-no-properties string)
-        (mapcar (pcase-lambda (`(,start ,end ,properties))
-                  (let ((display (plist-get properties 'display)))
-                    (list start end
-                          (if (eq (car-safe display) 'image)
-                              (plist-put (copy-sequence properties) 'display
-                                         (list 'svg (plist-get (cdr display) :data)))
-                            properties))))
-                (object-intervals string))))
+it displays by its SVG text.  With ONLY, a list of properties, only
+those, a run of text with the same of them as one interval, whatever
+others split it into."
+  (let ((intervals nil))
+    (pcase-dolist (`(,start ,end ,properties) (object-intervals string))
+      (let ((properties (if only
+                            (cl-loop for (property value) on properties by #'cddr
+                                     when (memq property only) append (list property value))
+                          (copy-sequence properties))))
+        (when (plist-member properties 'display)
+          (setq properties (plist-put properties 'display
+                                      (lispm-ui-golden--image (plist-get properties 'display)))))
+        (if (and only intervals
+                 (= (cadr (car intervals)) start)
+                 (equal (caddr (car intervals)) properties))
+            (setf (cadr (car intervals)) end)
+          (push (list start end properties) intervals))))
+    (cons (substring-no-properties string) (nreverse intervals))))
+
+(defun lispm-ui-golden--shown ()
+  "Return the current buffer as it is shown: its text with its faces and
+what it displays, the faces and line prefixes its overlays give, in an
+order of their own, and its faces' remappings."
+  (list (lispm-ui-golden--intervals (buffer-string) '(face display))
+        (sort (delq nil (mapcar (lambda (overlay)
+                                  (let ((face (overlay-get overlay 'face))
+                                        (prefix (overlay-get overlay 'line-prefix)))
+                                    (when (or face prefix)
+                                      (list (overlay-start overlay) (overlay-end overlay) face prefix))))
+                                (overlays-in (point-min) (point-max))))
+              (lambda (a b) (string< (prin1-to-string a) (prin1-to-string b))))
+        face-remapping-alist))
+
+(defun lispm-ui-golden--form (make)
+  "Return how the form MAKE makes, a function returning its buffer, shows
+dressed, see `lispm-ui-golden--shown'; then, for each place TAB takes
+point to, from the form's start, what is displayed there and the face of
+the text field there, if one is: what the keyboard is on drawn focused.
+Emacs's widgets show the pictures they are given, as on a graphical
+display, which a batch Emacs is not."
+  (cl-letf (((symbol-function 'widget-image-find)
+             (lambda (image) (and (eq (car-safe image) 'image) image))))
+    (let ((buffer (funcall make)))
+      (unwind-protect
+          (with-current-buffer buffer
+            (let ((shown (lispm-ui-golden--shown))
+                  (stops nil))
+              (goto-char (point-min))
+              (dotimes (_ 12)
+                (widget-forward 1)
+                (run-hooks 'post-command-hook)
+                (push (list (point)
+                            (lispm-ui-golden--image (get-text-property (point) 'display))
+                            (when-let* ((field (widget-field-at (point)))
+                                        (overlay (widget-get field :field-overlay)))
+                              (overlay-get overlay 'face)))
+                      stops))
+              (list shown (nreverse stops))))
+        (kill-buffer buffer)))))
+
+(defun lispm-ui-golden--as-a-window-shows ()
+  "Lay the form in this buffer out as a desktop's window shows it: titled
+with its title, its fields as wide as a narrower face makes them."
+  (setq-local lispm-ui-form-show-header nil
+              lispm-ui-form-width 44))
+
+(defconst lispm-ui-golden--fields
+  '((name :type text :label "Name" :required t :value "Ada" :help "What it is called")
+    (looks :type heading :label "Looks")
+    (avatar :type picture :label "Picture")
+    (mood :type choice :label "Mood" :choices ((calm . "Calm") (bright . "Bright")) :value calm)
+    (thinks :type radio :label "Model" :choices ((lispm . "LispM's") (own . "Its own")) :value lispm)
+    (talks :type check :label "Talks" :text "Speaks first" :value t)
+    (soul :type text-area :label "Soul" :lines 3 :value "Kind.")
+    (more :type buttons :label "More" :buttons (("Test" . ignore))))
+  "The fields of the form drawn dressed: one of each type.")
+
+(defun lispm-ui-golden--foreign-form (glyph dress)
+  "Return how a form drawn with Emacs's widgets, not LispM UI's, shows once
+DRESS, a function, dresses it, its controls' pictures given by GLYPH, as
+the glyph function gives them: see `lispm-ui-golden--form'."
+  (lispm-ui-golden--form
+   (lambda ()
+     (let ((buffer (generate-new-buffer "*foreign form*")))
+       (with-current-buffer buffer
+         (widget-insert "Server: ")
+         (widget-create 'editable-field :size 20 "imap.example.com")
+         (widget-insert "\nNotes:\n")
+         (widget-create 'text :format "%v" :value "One\nTwo\n")
+         (widget-insert "\n")
+         (widget-create 'toggle :format "%[%v%]" :on "[X]" :off "[ ]"
+                        :on-glyph (funcall glyph 'check 'on nil)
+                        :off-glyph (funcall glyph 'check 'off nil)
+                        :lispm-form-control 'check :value t)
+         (widget-insert " Keep mail\n")
+         (widget-create 'push-button :tag "Test" :tag-glyph (funcall glyph 'button nil "Test")
+                        :lispm-form-control '(button nil "Test"))
+         (widget-insert "\n")
+         (widget-setup)
+         (funcall dress))
+       buffer))))
 
 (defconst lispm-ui-golden-cases
   `((palette-classic (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic))
@@ -329,14 +447,44 @@ otherwise, of the same text."
                      (lispm-ui-popup-button "Choice" :state 'pressed) (lispm-ui-radio t nil t)
                      (lispm-ui-check-box nil 'disabled) (lispm-ui-list-check-box 'mixed)
                      (lispm-ui-bevel-button "Go" 'pressed 24) (lispm-ui-group-edge 100 "Box")
-                     (lispm-ui-group-side 18))))))
+                     (lispm-ui-group-side 18)))))
+    ;; lispm-ui-form.el, its dressing
+    (form-glyphs
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (append (mapcar (lambda (arguments) (lispm-ui-golden--image (apply #'lispm-ui-form-glyph arguments)))
+                       '((check on nil) (check off nil) (radio on nil) (radio off nil)
+                         (button nil "Cancel") (button default "Create") (popup nil "Calm")
+                         (picture nil nil)))
+               (mapcar (lambda (arguments) (lispm-ui-golden--image (apply #'lispm-ui-form--image arguments)))
+                       '((check on nil t) (radio off nil t) (button default "Create" t)
+                         (popup nil "Calm" t))))))
+    (form-groups
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
+       (mapcar #'lispm-ui-golden--intervals
+               (list (lispm-ui-form-group 'top 240 "Looks") (lispm-ui-form-group 'bottom 240)
+                     (lispm-ui-form-group 'side)))))
+    (form-dressed
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic))
+           (lispm-ui-form-glyph-function #'lispm-ui-form-glyph)
+           (lispm-ui-form-group-function #'lispm-ui-form-group)
+           (lispm-ui-form-mode-hook (list #'lispm-ui-form--faces #'lispm-ui-golden--as-a-window-shows))
+           (lispm-ui-form-drawn-hook (list #'lispm-ui-form-dress)))
+       (lispm-ui-golden--form
+        (lambda () (lispm-ui-form "New Character" lispm-ui-golden--fields :submit "Create")))))
+    (foreign-form-dressed
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
+       (lispm-ui-golden--foreign-form #'lispm-ui-form-glyph #'lispm-ui-form-dress))))
   "The cases compared, (NAME FORM) each, FORM in LispM UI's names.")
 
 (defun lispm-ui-golden--rename (form names)
   "Return FORM with each symbol of NAMES, (FROM . TO) each, made TO."
   (cond ((symbolp form) (or (alist-get form names) form))
-        ((consp form) (cons (lispm-ui-golden--rename (car form) names)
-                            (lispm-ui-golden--rename (cdr form) names)))
+        ((consp form)
+         ;; A list along, not down its cdrs: what a form drew is long.
+         (let ((renamed nil))
+           (while (consp form)
+             (push (lispm-ui-golden--rename (pop form) names) renamed))
+           (nconc (nreverse renamed) (and form (lispm-ui-golden--rename form names)))))
         ((vectorp form) (apply #'vector (mapcar (lambda (x) (lispm-ui-golden--rename x names)) form)))
         (t form)))
 
@@ -350,20 +498,29 @@ font installed."
   (expand-file-name "golden.eld" (file-name-directory (or load-file-name buffer-file-name)))
   "Where what the desktop made is kept.")
 
+(defconst lispm-ui-golden-widget-cases '(form-dressed foreign-form-dressed)
+  "The cases drawing forms with Emacs's widgets, which Emacs 31 draws
+otherwise than Emacs 30, a text area's last newline in an overlay of its
+own: compared in the major version of Emacs that wrote them.")
+
 (defun lispm-ui-golden-read ()
-  "Return what the desktop made, (NAME . VALUE) each."
+  "Return what the desktop made, (NAME . VALUE) each, and the major version
+of Emacs that wrote it, as (:emacs . VERSION)."
   (with-temp-buffer
     (insert-file-contents lispm-ui-golden-file)
     (read (current-buffer))))
 
 (defun lispm-ui-golden-write ()
   "Write what the desktop's functions make of `lispm-ui-golden-cases' to
-`lispm-ui-golden-file'.  Run with the desktop's lisp/ on the load path."
+`lispm-ui-golden-file'.  Run with the desktop's lisp/ on the load path.
+What they make is written in LispM UI's names, as a face it remaps."
   (require 'lispm-desktop-platinum-draw)
   (require 'lispm-desktop-platinum-controls)
   (require 'lispm-desktop-look)
   (require 'lispm-desktop-i18n)
+  (require 'lispm-desktop-form)
   (let ((names (mapcar (pcase-lambda (`(,new . ,old)) (cons new old)) lispm-ui-golden-names))
+        (back (mapcar (pcase-lambda (`(,new . ,old)) (cons old new)) lispm-ui-golden-names))
         (print-length nil)
         (print-level nil)
         (print-escape-newlines t))
@@ -371,10 +528,10 @@ font installed."
       (insert ";;; golden.eld --- What LispM Desktop drew, for LispM UI's tests  -*- lisp-data -*-\n"
               ";; SPDX-License-Identifier: AGPL-3.0-or-later\n\n"
               ";; Written by `lispm-ui-golden-write' (make golden); see lispm-ui-golden.el.\n\n"
-              "(")
+              "((:emacs . " (number-to-string emacs-major-version) ")")
       (pcase-dolist (`(,name ,form) lispm-ui-golden-cases)
         (insert "\n (" (symbol-name name) " . ")
-        (prin1 (lispm-ui-golden-eval form names) (current-buffer))
+        (prin1 (lispm-ui-golden--rename (lispm-ui-golden-eval form names) back) (current-buffer))
         (insert ")"))
       (insert ")\n"))
     (message "Wrote %s" lispm-ui-golden-file)))

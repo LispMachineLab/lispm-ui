@@ -109,14 +109,19 @@ text terminal counts a cell for eight pixels."
 (require 'lispm-ui-golden (expand-file-name "test/lispm-ui-golden.el" lispm-ui-test--directory))
 
 (ert-deftest lispm-ui-test-draws-as-the-desktop-drew ()
-  "LispM UI's palettes, drawings and lines are those LispM Desktop made
-before they moved here, see test/lispm-ui-golden.el.  What needs XML
-parsed is left out where Emacs cannot parse it."
-  (let ((golden (lispm-ui-golden-read)))
+  "LispM UI's palettes, drawings, lines and forms are those LispM Desktop
+made before they moved here, see test/lispm-ui-golden.el.  What needs
+XML parsed is left out where Emacs cannot parse it, and forms drawn with
+Emacs's widgets where Emacs is of another version than wrote them."
+  (let* ((golden (lispm-ui-golden-read))
+         (emacs (alist-get :emacs golden)))
+    (setq golden (assq-delete-all :emacs golden))
     (should (equal (mapcar #'car golden) (mapcar #'car lispm-ui-golden-cases)))
     (pcase-dolist (`(,name ,form) lispm-ui-golden-cases)
-      (unless (and (memq name '(dom embed content-image))
-                   (not (fboundp 'libxml-parse-xml-region)))
+      (unless (or (and (memq name '(dom embed content-image))
+                       (not (fboundp 'libxml-parse-xml-region)))
+                  (and (memq name lispm-ui-golden-widget-cases)
+                       (not (eql emacs emacs-major-version))))
         (should (equal (list name (lispm-ui-golden-eval form))
                        (list name (alist-get name golden))))))))
 
@@ -797,6 +802,139 @@ point while point is in it, and its start once point has left it."
           (should (plist-get (lispm-ui-form-geometry buffer) :right))
           (with-current-buffer buffer
             (should (equal (lispm-ui-form-title) "Pet"))))
+      (kill-buffer buffer))))
+
+(defconst lispm-ui-test--classic '("#DDDDDD" "#000000" "#777777" "#6363CE")
+  "The colours a classic theme gives a palette.")
+
+(defun lispm-ui-test--images-shown ()
+  "The images the current buffer displays, in order."
+  (let ((images nil))
+    (dotimes (index (- (point-max) (point-min)))
+      (let ((display (get-text-property (+ (point-min) index) 'display)))
+        (when (and (eq (car-safe display) 'image) (not (eq display (car images))))
+          (push display images))))
+    (nreverse images)))
+
+(ert-deftest lispm-ui-test-form-undressed ()
+  "Until LispM UI has a palette, a form is drawn as text, as it was: no
+pictures, no group boxes, its faces its own, nothing drawn focused."
+  (let* ((lispm-ui-current-palette nil)
+         (buffer (cl-letf (((symbol-function 'widget-image-find)
+                            (lambda (image) (and (eq (car-safe image) 'image) image))))
+                   (lispm-ui-form "Pet" '((looks :type heading :label "Looks")
+                                          (name :type text :label "Name")
+                                          (kind :type radio :label "Kind" :choices ((cat . "Cat")))
+                                          (avatar :type picture :label "Picture"))))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should-not (lispm-ui-form-glyph 'button nil "OK"))
+          (should-not (lispm-ui-form-group 'side))
+          (should-not (lispm-ui-test--images-shown))
+          (goto-char (point-min))
+          (search-forward "Looks")
+          (should (eq (get-text-property (1- (point)) 'face) 'lispm-ui-form-title))
+          (should-not face-remapping-alist)
+          (should-not (memq #'lispm-ui-form--follow post-command-hook))
+          (should (eq (overlay-get (widget-get (alist-get 'name lispm-ui-form--widgets) :field-overlay) 'face)
+                      'widget-field)))
+      (kill-buffer buffer))))
+
+(ert-deftest lispm-ui-test-form-dressed ()
+  "With a palette, a form is drawn in LispM UI's controls and group boxes,
+on the chrome's ground, what the keyboard is on drawn focused as it
+moves; a check box's or a radio button's picture leaves its centring to
+Emacs's widgets.  On a text terminal its controls are text, its group
+boxes lines, and its faces its own."
+  (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic)))
+    (let ((check (lispm-ui-form-glyph 'check 'on nil))
+          (button (lispm-ui-form-glyph 'button 'default "OK")))
+      (should (eq (car check) 'image))
+      (should-not (plist-member (cdr check) :ascent))
+      (should (eq (plist-get (cdr button) :ascent) 'center))
+      (should (eq (car (lispm-ui-form-glyph 'picture nil nil)) 'image)))
+    (cl-letf (((symbol-function 'widget-image-find)
+               (lambda (image) (and (eq (car-safe image) 'image) image))))
+      (let ((buffer (lispm-ui-form "Pet" '((looks :type heading :label "Looks")
+                                           (name :type text :label "Name")
+                                           (cat :type check :label "Cat")))))
+        (unwind-protect
+            (with-current-buffer buffer
+              (should (equal (alist-get 'default face-remapping-alist)
+                             `((lispm-ui-list (:background ,(lispm-ui-color :chrome))) default)))
+              (should (memq #'lispm-ui-form--follow post-command-hook))
+              ;; Its group box, its push buttons and its check box are drawn.
+              (should (>= (length (lispm-ui-test--images-shown)) 5))
+              ;; It starts in its first field, ringed in the focus colour
+              ;; as the command showing it ends.
+              (let ((name (widget-get (alist-get 'name lispm-ui-form--widgets) :field-overlay))
+                    (cat (alist-get 'cat lispm-ui-form--widgets)))
+                (run-hooks 'post-command-hook)
+                (should (eq (overlay-get name 'face) 'lispm-ui-field-focused))
+                ;; Gone on to the check box, it rings that instead.
+                (widget-forward 1)
+                (run-hooks 'post-command-hook)
+                (should (eq (overlay-get name 'face) 'widget-field))
+                (should (eq (widget-at (point)) cat))
+                (should (eq (get-text-property (point) 'display) (lispm-ui-form--image 'check 'off nil t)))
+                ;; Gone on again, it is drawn plain.
+                (widget-forward 1)
+                (run-hooks 'post-command-hook)
+                (should (eq (get-text-property (widget-get cat :from) 'display)
+                            (lispm-ui-form--image 'check 'off nil)))))
+          (kill-buffer buffer))))
+    (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) t)))
+      (should-not (lispm-ui-form-glyph 'button nil "OK"))
+      (should (equal (lispm-ui-form-group 'side) "│"))
+      (should (equal (lispm-ui-form-group 'top 20 "Looks") "┌─ Looks ──────────┐"))
+      (with-temp-buffer
+        (lispm-ui-form--faces)
+        (should-not face-remapping-alist)))))
+
+(ert-deftest lispm-ui-test-form-dressed-elsewhere ()
+  "A form an application draws with Emacs's widgets itself is dressed as
+LispM UI's are once it calls `lispm-ui-form-dress', its controls found
+by the properties `lispm-ui-form-control-properties' names, its text
+areas white panels."
+  (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+        (lispm-ui-form-control-properties '(:lispm-form-control :pet-control)))
+    (cl-letf (((symbol-function 'widget-image-find)
+               (lambda (image) (and (eq (car-safe image) 'image) image))))
+      (with-temp-buffer
+        (widget-insert "Notes:\n")
+        (let ((notes (widget-create 'text :format "%v" :value "Sits.\n"))
+              (check (progn (widget-insert "\n")
+                            (widget-create 'toggle :format "%[%v%]" :on "[X]" :off "[ ]"
+                                           :on-glyph (lispm-ui-form-glyph 'check 'on nil)
+                                           :off-glyph (lispm-ui-form-glyph 'check 'off nil)
+                                           :pet-control 'check :value t))))
+          (widget-insert "\n")
+          (widget-setup)
+          (lispm-ui-form-dress)
+          (should (assq 'default face-remapping-alist))
+          (should (eq (overlay-get (widget-get notes :field-overlay) 'face) 'lispm-ui-form-text-area))
+          (goto-char (widget-get check :from))
+          (run-hooks 'post-command-hook)
+          (should (eq (get-text-property (point) 'display) (lispm-ui-form--image 'check 'on nil t))))))))
+
+(ert-deftest lispm-ui-test-form-redrawn ()
+  "Every form is drawn again when the palette changes, once what shows
+LispM UI has set its faces in it, its faces remapped to the new colours,
+and when the language changes."
+  (should (memq #'lispm-ui-form-redraw-all lispm-ui-language-changed-hook))
+  (let* ((buffer (lispm-ui-form "Pet" '((name :type text :label "Name"))))
+         (hook (default-toplevel-value 'lispm-ui-palette-changed-hook)))
+    (unwind-protect
+        (lispm-ui-test--with-theme '("#282a36" "#f8f8f2" "#6272a4" "#bd93f9")
+          (let ((order nil))
+            (setq lispm-ui-palette-changed-hook hook)
+            (add-hook 'lispm-ui-palette-changed-hook (lambda () (push 'faces order)))
+            (let ((lispm-ui-form-drawn-hook (cons (lambda () (push 'drawn order)) lispm-ui-form-drawn-hook)))
+              (lispm-ui-palette-update))
+            (should (equal (nreverse order) '(faces drawn)))
+            (with-current-buffer buffer
+              (should (equal (alist-get 'default face-remapping-alist)
+                             '((lispm-ui-list (:background "#1e2028")) default))))))
       (kill-buffer buffer))))
 
 (ert-deftest lispm-ui-test-form-former-names ()

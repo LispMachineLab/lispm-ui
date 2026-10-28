@@ -104,6 +104,191 @@ text terminal counts a cell for eight pixels."
     (should (= (lispm-ui-px 12) 2))
     (should (= (lispm-ui-px 3) 0))))
 
+;;;; What the desktop drew
+
+(require 'lispm-ui-golden (expand-file-name "test/lispm-ui-golden.el" lispm-ui-test--directory))
+
+(ert-deftest lispm-ui-test-draws-as-the-desktop-drew ()
+  "LispM UI's palettes, drawings and lines are those LispM Desktop made
+before they moved here, see test/lispm-ui-golden.el.  What needs XML
+parsed is left out where Emacs cannot parse it."
+  (let ((golden (lispm-ui-golden-read)))
+    (should (equal (mapcar #'car golden) (mapcar #'car lispm-ui-golden-cases)))
+    (pcase-dolist (`(,name ,form) lispm-ui-golden-cases)
+      (unless (and (memq name '(dom embed content-image))
+                   (not (fboundp 'libxml-parse-xml-region)))
+        (should (equal (list name (lispm-ui-golden-eval form))
+                       (list name (alist-get name golden))))))))
+
+;;;; lispm-ui-palette
+
+(defmacro lispm-ui-test--with-theme (colors &rest body)
+  "Run BODY with the theme's faces giving COLORS, (CONTENT TEXT DIM
+ACCENT), LispM UI's palette, its faces and its hooks as they are kept
+apart from the rest of Emacs."
+  (declare (indent 1))
+  `(pcase-let ((`(,content ,text ,dim ,accent) ,colors))
+     (let ((lispm-ui-current-palette nil)
+           (lispm-ui-palette-generation 0)
+           (lispm-ui-palette-functions nil)
+           (lispm-ui-palette-changed-hook nil)
+           (faces (mapcar (lambda (face) (cons face (copy-sequence (face-all-attributes face))))
+                          '(lispm-ui-title lispm-ui-small lispm-ui-field lispm-ui-field-focused
+                            lispm-ui-button lispm-ui-button-pressed))))
+       (cl-letf (((symbol-function 'face-background)
+                  (lambda (face &rest _) (and (eq face 'default) content)))
+                 ((symbol-function 'face-foreground)
+                  (lambda (face &rest _)
+                    (pcase face ('default text) ('shadow dim) ('font-lock-constant-face accent)))))
+         (unwind-protect (progn ,@body)
+           (pcase-dolist (`(,face . ,attributes) faces)
+             (apply #'set-face-attribute face nil
+                    (apply #'append (mapcar (pcase-lambda (`(,key . ,value)) (list key value))
+                                            attributes)))))))))
+
+(ert-deftest lispm-ui-test-palette-update ()
+  "The palette is derived from the theme's faces, the colours a function
+of `lispm-ui-palette-functions' names put in place, a later function's
+winning; each is a generation later, LispM UI's faces take its colours,
+and `lispm-ui-palette-changed-hook' runs.  A theme whose colours cannot
+be read leaves the palette as it was."
+  (lispm-ui-test--with-theme '("#DDDDDD" "#000000" "#777777" "#6363CE")
+    (let ((changed 0))
+      (add-hook 'lispm-ui-palette-changed-hook (lambda () (setq changed (1+ changed))))
+      (should (equal (lispm-ui-palette-update)
+                     (lispm-ui-derive-palette "#DDDDDD" "#000000" "#777777" "#6363CE")))
+      (should (= lispm-ui-palette-generation 1))
+      (should (= changed 1))
+      (should (equal (face-attribute 'lispm-ui-field :background) "#DDDDDD"))
+      (should (equal (plist-get (face-attribute 'lispm-ui-field-focused :box) :color) "#6363CE"))
+      (should (equal (face-attribute 'lispm-ui-button :background) (lispm-ui-color :chrome)))
+      (should (eq (face-attribute 'lispm-ui-small :inherit) 'lispm-ui-list))
+      (setq lispm-ui-palette-functions (list (lambda () '(:chrome "#CCCCCC" :focus "#FF0000"))
+                                             (lambda () '(:focus "#00FF00"))))
+      (lispm-ui-palette-update)
+      (should (equal (lispm-ui-color :chrome) "#CCCCCC"))
+      (should (equal (lispm-ui-color :focus) "#00FF00"))
+      (should (equal (lispm-ui-color :outline) "#212121"))
+      (should (= lispm-ui-palette-generation 2))
+      (let ((palette lispm-ui-current-palette))
+        (cl-letf (((symbol-function 'face-background) #'ignore))
+          (should-not (lispm-ui-palette-update)))
+        (should (eq lispm-ui-current-palette palette))
+        (should (= lispm-ui-palette-generation 2))
+        (should (= changed 2))))))
+
+(ert-deftest lispm-ui-test-palette-follows-theme ()
+  "Following the theme derives the palette at once, and again as a theme
+is enabled."
+  (lispm-ui-test--with-theme '("#282a36" "#f8f8f2" "#6272a4" "#bd93f9")
+    (let ((enable-theme-functions nil))
+      (lispm-ui-palette-follow-theme)
+      (should (memq #'lispm-ui-palette-update enable-theme-functions))
+      (should (equal (lispm-ui-color :content) "#282a36"))
+      (run-hook-with-args 'enable-theme-functions 'some-theme)
+      (should (= lispm-ui-palette-generation 2)))))
+
+(ert-deftest lispm-ui-test-greys ()
+  "In the classic palette every grey is itself; in another, the greys
+above the chrome lean toward its light, those below toward its outline."
+  (let ((classic '(:chrome "#dddddd" :light "#ffffff" :outline "#000000")))
+    (dolist (level '(#x00 #x44 #x88 #xCC #xDD #xEE #xFF))
+      (should (equal (lispm-ui-grey classic level) (format "#%02x%02x%02x" level level level)))))
+  (let ((other '(:chrome "#404040" :light "#808080" :outline "#000000")))
+    (should (equal (lispm-ui-grey other #xDD) "#404040"))
+    (should (equal (lispm-ui-grey other #xFF) "#808080"))
+    (should (equal (lispm-ui-grey other #x00) "#000000"))))
+
+;;;; lispm-ui-look
+
+(cl-defgeneric lispm-ui-test--drawn-by ()
+  "Which method draws, for the look dispatch test."
+  'classic)
+
+(cl-defmethod lispm-ui-test--drawn-by (&context (lispm-ui-look (lispm-ui-look-family test-pc)))
+  (list 'family (cl-call-next-method)))
+
+(cl-defmethod lispm-ui-test--drawn-by (&context (lispm-ui-look (eql test-win)))
+  (list 'own (cl-call-next-method)))
+
+(ert-deftest lispm-ui-test-looks ()
+  "A look is defined once, again replacing its properties; its title is
+its own or its name; its family and metrics are read from it.  A look's
+own method comes before its family's, which comes before the classic
+default."
+  (let ((lispm-ui-looks nil))
+    (should (eq (lispm-ui-look-define 'test-win :title "Windows" :family 'test-pc
+                                      :metrics '(:border 4))
+                'test-win))
+    (lispm-ui-look-define 'test-os2 :family 'test-pc :system-families '("Helv"))
+    (lispm-ui-look-define 'test-win :title "Windows 3.2" :family 'test-pc :metrics '(:border 4))
+    (should (equal (mapcar #'car lispm-ui-looks) '(test-win test-os2)))
+    (should (equal (lispm-ui-look-title 'test-win) "Windows 3.2"))
+    (should (equal (lispm-ui-look-title 'test-os2) "Test-Os2"))
+    (should (eq (lispm-ui-look-family 'test-os2) 'test-pc))
+    (should (= (lispm-ui-look-metric :border 'test-win) 4))
+    (let ((lispm-ui-look 'test-os2))
+      (should (equal (lispm-ui-look-families :system-families '("Default")) '("Helv")))
+      (should (equal (lispm-ui-look-families :list-families '("Default")) '("Default")))
+      (should (equal (lispm-ui-test--drawn-by) '(family classic))))
+    (let ((lispm-ui-look 'test-win))
+      (should (equal (lispm-ui-test--drawn-by) '(own (family classic)))))
+    (let ((lispm-ui-look 'classic))
+      (should (eq (lispm-ui-test--drawn-by) 'classic)))))
+
+;;;; lispm-ui-text
+
+(ert-deftest lispm-ui-test-text ()
+  "Text is measured in its faces over a face beneath; fitted to a width,
+it ends in an ellipsis in its first face once cut; a space is so wide, or
+reaches so far from the left or the right."
+  (should (= (lispm-ui-text-width "Hello") 5))
+  (should (equal (lispm-ui-text-fit "Hello" 5) "Hello"))
+  (let ((fitted (lispm-ui-text-fit (propertize "Hello, world" 'face 'bold) 6)))
+    (should (equal fitted "Hello…"))
+    (should (eq (get-text-property 5 'face fitted) 'bold)))
+  (should (equal (lispm-ui-text-fit "ab cd" 4) "ab…"))
+  (should (equal (get-text-property 0 'display (lispm-ui-text-space 7)) '(space :width (7))))
+  (should (equal (get-text-property 0 'display (lispm-ui-text-space -2)) '(space :width (0))))
+  (should (equal (get-text-property 0 'display (lispm-ui-text-to 40)) '(space :align-to (40))))
+  (should (equal (get-text-property 0 'display (lispm-ui-text-to 8 t))
+                 '(space :align-to (- right (8))))))
+
+(ert-deftest lispm-ui-test-cjk-family ()
+  "Chinese and Japanese are drawn in a family for the language spoken,
+the first installed; another language takes Simplified Chinese's."
+  (cl-letf (((symbol-function 'font-family-list)
+             (lambda (&rest _) '("Noto Sans CJK JP" "PingFang SC" "Geneva"))))
+    (let ((lispm-ui-language 'ja))
+      (should (equal (lispm-ui-text-cjk-family) "Noto Sans CJK JP")))
+    (let ((lispm-ui-language 'de))
+      (should (equal (lispm-ui-text-cjk-family) "PingFang SC")))
+    (let ((lispm-ui-language 'zh-Hant))
+      (should-not (lispm-ui-text-cjk-family)))))
+
+;;;; lispm-ui-draw
+
+(ert-deftest lispm-ui-test-image-cache ()
+  "An image is drawn once for its key in a palette, again in the next
+palette, and apart for each look; the cache is emptied past 512 images."
+  (let ((lispm-ui--images (make-hash-table :test #'equal))
+        (lispm-ui-palette-generation 1)
+        (drawn 0))
+    (cl-flet ((draw () (setq drawn (1+ drawn)) "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"2\" height=\"2\"/>"))
+      (let ((image (lispm-ui-image '(dot 1) #'draw)))
+        (should (eq (car image) 'image))
+        (should (eq (lispm-ui-image '(dot 1) #'draw) image)))
+      (should (= drawn 1))
+      (setq lispm-ui-palette-generation 2)
+      (lispm-ui-image '(dot 1) #'draw)
+      (should (= drawn 2))
+      (let ((lispm-ui-look 'classic)) (lispm-ui-look-image '(dot 1) #'draw))
+      (let ((lispm-ui-look 'other)) (lispm-ui-look-image '(dot 1) #'draw))
+      (should (= drawn 4))
+      (dotimes (i 520) (puthash (list 'filler i) t lispm-ui--images))
+      (lispm-ui-image '(dot 2) #'draw)
+      (should (= (hash-table-count lispm-ui--images) 1)))))
+
 ;;;; lispm-ui-modal
 
 (ert-deftest lispm-ui-test-modal-key-roles ()

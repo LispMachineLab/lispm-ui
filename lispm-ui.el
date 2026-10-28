@@ -34,6 +34,16 @@
 ;;   lispm-ui-i18n.el   the language its words are shown in, and their
 ;;                      translations, i18n/, which LispM Kit's engine
 ;;                      reads
+;;   lispm-ui-palette.el
+;;                      the colours it draws in, derived from the colour
+;;                      theme, and its faces
+;;   lispm-ui-look.el   the looks it draws in, the forms of one system's
+;;                      interface or another's
+;;   lispm-ui-text.el   text laid out in pixels: widths, fitting, aligning
+;;                      and breaking lines
+;;   lispm-ui-draw.el   what it draws with: SVG primitives, text and
+;;                      pictures drawn as Emacs shows them, and the cache
+;;                      of drawn images
 ;;   lispm-ui-modal.el  what its modal panels share: reading events
 ;;                      without quitting, what each key does, focus
 ;;                      rings, holding a control pressed
@@ -53,6 +63,10 @@
 
 (require 'lispm-ui-base)
 (require 'lispm-ui-i18n)
+(require 'lispm-ui-palette)
+(require 'lispm-ui-look)
+(require 'lispm-ui-text)
+(require 'lispm-ui-draw)
 (require 'lispm-ui-modal)
 (require 'lispm-ui-ask)
 (require 'lispm-ui-form)

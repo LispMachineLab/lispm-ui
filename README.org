@@ -10,14 +10,27 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 
 * What it holds
 
-| =lispm-ui-base.el=  | where it is; whether a frame is a text terminal, where controls are drawn in text; lengths in pixels, counted in cells there |
-| =lispm-ui-i18n.el=  | the language its words are shown in, and their translations, =i18n/=                                                     |
-| =lispm-ui-modal.el= | what its modal panels share: reading events without quitting, what each key does, focus rings, holding a control pressed |
-| =lispm-ui-ask.el=   | asking a person: an alert, a question to agree to, a choice, a file                                                      |
-| =lispm-ui-form.el=  | forms, written as data                                                                                                   |
+| =lispm-ui-base.el=    | where it is; whether a frame is a text terminal, where controls are drawn in text; lengths in pixels, counted in cells there |
+| =lispm-ui-i18n.el=    | the language its words are shown in, and their translations, =i18n/=                                                     |
+| =lispm-ui-palette.el= | the colours it draws in, derived from the colour theme, and its faces                                                    |
+| =lispm-ui-look.el=    | the looks it draws in, each the forms of one system's interface, and families of looks drawn alike                      |
+| =lispm-ui-text.el=    | text laid out in pixels: widths, fitting with an ellipsis, aligning, breaking lines, Chinese and Japanese type          |
+| =lispm-ui-draw.el=    | what it draws with: SVG primitives, text and pictures drawn as Emacs shows them, and the cache of drawn images          |
+| =lispm-ui-modal.el=   | what its modal panels share: reading events without quitting, what each key does, focus rings, holding a control pressed |
+| =lispm-ui-ask.el=     | asking a person: an alert, a question to agree to, a choice, a file                                                      |
+| =lispm-ui-form.el=    | forms, written as data                                                                                                   |
 
 =lispm-ui.el= loads every part.  More come as LispM's interface moves here: drawn controls, alerts,
 menus, and a dialog choosing a file.
+
+* Colours and looks
+
+What LispM UI draws takes its colours from a palette derived from the colour theme in use, so any
+theme draws it.  ~lispm-ui-palette-follow-theme~ derives it now and again as a theme is enabled;
+whatever shows LispM UI may name colours outright with a function of ~lispm-ui-palette-functions~,
+and colour its own faces on ~lispm-ui-palette-changed-hook~.  Each drawing is a generic function
+whose default method draws the classic look; a look, named by ~lispm-ui-look~, draws its own forms
+in methods specialized on it, or on its family of looks (see =lispm-ui-look.el=).
 
 * Forms
 
@@ -80,7 +93,9 @@ it uses, or ~lispm-ui~ for all of them.
 =make test compile= runs the tests and byte-compiles the sources, warnings counted as errors,
 with a checkout of LispM Kit beside this one, or where =LISPM_KIT= says.
 =make i18n= lists the messages each catalog lacks, and those it holds that the code no longer
-gives.
+gives.  The palettes, drawings and lines LispM UI makes are those LispM's desktop made before
+they moved here, which =test/golden.eld= keeps: =make golden LISPM_DESKTOP=…= writes it again from a
+checkout of the desktop from then (see =test/lispm-ui-golden.el=).
 
 * License
 

@@ -11,6 +11,7 @@
   ("OK" . "好")
   ("Choose a File" . "選擇檔案")
   ("%s:" . "%s：")
+  ("TAB goes to the next field · changes take effect at once · C-c C-c closes" . "TAB 到下一欄 · 變更立即生效 · C-c C-c 關閉")
   ("TAB goes to the next field · C-c C-c %s · C-c C-k cancels" . "TAB 到下一欄 · C-c C-c %s · C-c C-k 取消")
   ("Choose…" . "選取…")
   ("No picture" . "沒有圖片")

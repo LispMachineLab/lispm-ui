@@ -289,6 +289,113 @@ palette, and apart for each look; the cache is emptied past 512 images."
       (lispm-ui-image '(dot 2) #'draw)
       (should (= (hash-table-count lispm-ui--images) 1)))))
 
+;;;; lispm-ui-controls
+
+(defmacro lispm-ui-test--with-controls (&rest body)
+  "Run BODY in a buffer of its own, controls drawn in the classic palette."
+  (declare (indent 0))
+  `(let ((lispm-ui-current-palette (lispm-ui-derive-palette "#DDDDDD" "#000000" "#777777" "#6363CE"))
+         (lispm-ui-palette-generation 1)
+         (lispm-ui--images (make-hash-table :test #'equal)))
+     (with-temp-buffer
+       ,@body)))
+
+(ert-deftest lispm-ui-test-controls-in-buffer ()
+  "Controls inserted in a buffer are buttons Tab goes between, past a
+disabled push button; the control point is on is drawn focused, the one
+it left plain again."
+  (lispm-ui-test--with-controls
+    (let ((pressed nil))
+      (lispm-ui-insert-push-button "OK" (lambda () (push 'ok pressed)) :default t)
+      (insert " ")
+      (lispm-ui-insert-push-button "No" #'ignore :disabled t)
+      (insert " ")
+      (lispm-ui-insert-radio-button "Red" t (lambda () (push 'red pressed)))
+      (insert " ")
+      (lispm-ui-insert-check-box "Bold" nil (lambda () (push 'bold pressed)))
+      (goto-char (point-min))
+      (should (button-at (point)))
+      (should (equal (get-text-property (point) 'lispm-ui-label) "OK"))
+      (let ((ok (point)))
+        (should (equal (get-text-property ok 'display) (get-text-property ok 'lispm-ui-plain)))
+        (lispm-ui-show-focus)
+        (should (equal (get-text-property ok 'display) (get-text-property ok 'lispm-ui-focused)))
+        (should (= lispm-ui-focus ok))
+        (forward-button 1)
+        ;; The disabled button is passed by.
+        (should (string-prefix-p " Red" (buffer-substring (1+ (point)) (line-end-position))))
+        (lispm-ui-show-focus)
+        (should (equal (get-text-property ok 'display) (get-text-property ok 'lispm-ui-plain)))
+        (should (equal (get-text-property (point) 'display) (get-text-property (point) 'lispm-ui-focused)))
+        (push-button)
+        (should (equal pressed '(red)))
+        (forward-button 1)
+        (push-button)
+        (should (equal pressed '(bold red)))))))
+
+(ert-deftest lispm-ui-test-push-from-keyboard ()
+  "Return and Space press a push button, C-m being Return as the HHKB
+types it: drawn pushed in for a button's blink, then plain again, its
+action called."
+  (should (eq (keymap-lookup lispm-ui-push-button-map "RET") #'lispm-ui-push))
+  (should (eq (lookup-key lispm-ui-push-button-map (kbd "C-m")) #'lispm-ui-push))
+  (should (eq (keymap-lookup lispm-ui-push-button-map "SPC") #'lispm-ui-push))
+  (lispm-ui-test--with-controls
+    (let ((pressed 0) (shown nil))
+      (lispm-ui-insert-push-button "OK" (lambda () (setq pressed (1+ pressed))))
+      (goto-char (point-min))
+      (cl-letf (((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'sit-for)
+                 (lambda (seconds)
+                   (push (list seconds (get-text-property (point-min) 'display)) shown))))
+        (let ((last-input-event ?\r))
+          (lispm-ui-push)))
+      (should (= pressed 1))
+      (should (equal shown (list (list (alist-get 'button lispm-ui-modal-flashes)
+                                       (get-text-property (point-min) 'lispm-ui-pressed)))))
+      (should (equal (get-text-property (point-min) 'display)
+                     (get-text-property (point-min) 'lispm-ui-plain))))))
+
+(ert-deftest lispm-ui-test-popup-in-buffer ()
+  "A pop-up menu in a buffer asks with `lispm-ui-choose', its current
+choice checked, and gives its action the value chosen; nothing when
+none is."
+  (lispm-ui-test--with-controls
+    (let ((chosen nil) (asked nil) (answer '(blue)))
+      (lispm-ui-insert-popup-button "Red" '((red . "Red") (blue . "Blue"))
+                                    (lambda (value) (push value chosen))
+                                    :current 'red :help "Colour")
+      (goto-char (point-min))
+      (should (eq (get-text-property (point) 'keymap) lispm-ui-push-button-map))
+      (let ((lispm-ui-choose-function (lambda (&rest args) (push args asked) answer)))
+        (push-button)
+        (setq answer nil)
+        (push-button))
+      (should (equal chosen '(blue)))
+      (should (equal (car asked) '(((red . "Red") (blue . "Blue")) red nil "Colour"))))))
+
+(ert-deftest lispm-ui-test-controls-as-text ()
+  "On a text terminal controls are text: a button between brackets, the
+default one in the highlight; radio buttons and check boxes in
+brackets; a group box's edges in lines; the focused control ringed in
+the focus colour."
+  (lispm-ui-test--with-controls
+    (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&rest _) t)))
+      (let ((button (get-text-property 0 'display (lispm-ui-push-button "OK" :default t))))
+        (should (equal button "[ OK ]"))
+        (should (equal (plist-get (get-text-property 1 'face button) :background)
+                       (lispm-ui-color :highlight))))
+      (should (equal (get-text-property 0 'display (lispm-ui-radio t)) "(•)"))
+      (should (equal (get-text-property 0 'display (lispm-ui-check-box nil)) "[ ]"))
+      (should (equal (get-text-property 0 'display (lispm-ui-list-check-box 'mixed)) "[-]"))
+      (should (equal (get-text-property 0 'display (lispm-ui-popup-button "Red")) "[ Red ▾ ]"))
+      (should (equal (lispm-ui-group-edge 12 "Box") "┌─ Box ────┐"))
+      (should (equal (lispm-ui-group-edge 6 nil t) "└────┘"))
+      (should (equal (lispm-ui-group-side 20) "│"))
+      (let ((focused (lispm-ui-text-control "[x]" t)))
+        (should (equal (plist-get (get-text-property 0 'face focused) :background)
+                       (lispm-ui-color :focus)))))))
+
 ;;;; lispm-ui-modal
 
 (ert-deftest lispm-ui-test-modal-key-roles ()

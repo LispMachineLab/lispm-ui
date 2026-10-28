@@ -35,7 +35,8 @@
 ;;
 ;;   make golden LISPM_DESKTOP=../lispm-desktop/lisp
 ;;
-;; with LispM Desktop at 42a18a9, its last commit drawing on its own.  The
+;; with LispM Desktop at 42a18a9, its last commit drawing on its own, and
+;; LispM UI on the load path, whose modal kit it requires.  The
 ;; tests evaluate the same cases in LispM UI's names and find the same.
 ;; Whatever depends on the fonts installed is drawn with none, so that
 ;; any computer makes the same.
@@ -101,7 +102,51 @@
     (lispm-ui-svg-icon . lispm-desktop-platinum-svg-icon)
     (lispm-ui-svg-emacs-image . lispm-desktop-platinum-svg-emacs-image)
     (lispm-ui-svg-content . lispm-desktop-platinum-svg-content)
-    (lispm-ui-content-key . lispm-desktop-platinum--content-key))
+    (lispm-ui-content-key . lispm-desktop-platinum--content-key)
+    ;; lispm-ui-controls.el
+    (lispm-ui-bevel-button . lispm-desktop-platinum-bevel-button)
+    (lispm-ui-bevel-button-colors . lispm-desktop-platinum-bevel-button-colors)
+    (lispm-ui-bevel-padding . lispm-desktop-platinum-bevel-padding)
+    (lispm-ui-button-height . lispm-desktop-platinum-button-height)
+    (lispm-ui-check-box . lispm-desktop-platinum-check-box)
+    (lispm-ui-draw-bevel-button . lispm-desktop-platinum-draw-bevel-button)
+    (lispm-ui-draw-check-box . lispm-desktop-platinum-draw-check-box)
+    (lispm-ui-draw-group-edge . lispm-desktop-platinum-draw-group-edge)
+    (lispm-ui-draw-group-side . lispm-desktop-platinum-draw-group-side)
+    (lispm-ui-draw-list-check-box . lispm-desktop-platinum-draw-list-check-box)
+    (lispm-ui-draw-popup-button . lispm-desktop-platinum-draw-popup-button)
+    (lispm-ui-draw-push-button . lispm-desktop-platinum-draw-push-button)
+    (lispm-ui-draw-radio . lispm-desktop-platinum-draw-radio)
+    (lispm-ui-focus . lispm-desktop-platinum-focus)
+    (lispm-ui-focused . lispm-desktop-platinum-focused)
+    (lispm-ui-group-edge . lispm-desktop-platinum-group-edge)
+    (lispm-ui-group-side . lispm-desktop-platinum-group-side)
+    (lispm-ui-group-title-height . lispm-desktop-platinum-group-title-height)
+    (lispm-ui-image-of . lispm-desktop-platinum-image-of)
+    (lispm-ui-insert-check-box . lispm-desktop-platinum-insert-check-box)
+    (lispm-ui-insert-popup-button . lispm-desktop-platinum-insert-popup-button)
+    (lispm-ui-insert-push-button . lispm-desktop-platinum-insert-push-button)
+    (lispm-ui-insert-radio-button . lispm-desktop-platinum-insert-radio-button)
+    (lispm-ui-label . lispm-desktop-platinum-label)
+    (lispm-ui-list-check-box . lispm-desktop-platinum-list-check-box)
+    (lispm-ui-plain . lispm-desktop-platinum-plain)
+    (lispm-ui-popup-button . lispm-desktop-platinum-popup-button)
+    (lispm-ui-popup-button-width . lispm-desktop-platinum-popup-button-width)
+    (lispm-ui-pressed . lispm-desktop-platinum-pressed)
+    (lispm-ui-push . lispm-desktop-platinum-push)
+    (lispm-ui-push-button . lispm-desktop-platinum-push-button)
+    (lispm-ui-push-button-colors . lispm-desktop-platinum--push-button-colors)
+    (lispm-ui-push-button-map . lispm-desktop-platinum-push-button-map)
+    (lispm-ui-push-button-width . lispm-desktop-platinum-push-button-width)
+    (lispm-ui-radio . lispm-desktop-platinum-radio)
+    (lispm-ui-show-focus . lispm-desktop-platinum-show-focus)
+    (lispm-ui-svg-bevel-button . lispm-desktop-platinum--draw-bevel-button)
+    (lispm-ui-svg-focus-ring . lispm-desktop-platinum-svg-focus-ring)
+    (lispm-ui-svg-pixel-map . lispm-desktop-platinum-svg-pixel-map)
+    (lispm-ui-svg-popup-arrows . lispm-desktop-platinum-svg-popup-arrows)
+    (lispm-ui-svg-push-button . lispm-desktop-platinum-svg-push-button)
+    (lispm-ui-text-button . lispm-desktop-platinum-text-button)
+    (lispm-ui-text-control . lispm-desktop-platinum-text-control))
   "LispM UI's names of what moved from LispM Desktop, (NEW . OLD) each:
 the renames LispM Desktop makes, the other way round.")
 
@@ -120,6 +165,24 @@ function of the document."
   (let ((svg (svg-create width height)))
     (funcall draw svg)
     (with-temp-buffer (svg-print svg) (buffer-string))))
+
+(defun lispm-ui-golden--print (svg)
+  "Return the SVG text of SVG, a document of svg.el's."
+  (with-temp-buffer (svg-print svg) (buffer-string)))
+
+(defun lispm-ui-golden--intervals (string)
+  "Return STRING with its properties, which `equal' alone ignores, an image
+it displays by its SVG text: an Emacs without SVG makes the image
+otherwise, of the same text."
+  (cons (substring-no-properties string)
+        (mapcar (pcase-lambda (`(,start ,end ,properties))
+                  (let ((display (plist-get properties 'display)))
+                    (list start end
+                          (if (eq (car-safe display) 'image)
+                              (plist-put (copy-sequence properties) 'display
+                                         (list 'svg (plist-get (cdr display) :data)))
+                            properties))))
+                (object-intervals string))))
 
 (defconst lispm-ui-golden-cases
   `((palette-classic (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic))
@@ -204,7 +267,69 @@ function of the document."
     (words (lispm-ui-text-words "Words  and 日本語の文、ここ。 (paren) end."))
     (wrap (lispm-ui-text-wrap "A line broken between words, 中文的句子也可以断开。"
                               (lambda (line) (<= (string-width line) 12))))
-    (cjk-family (lispm-ui-text-cjk-family)))
+    (cjk-family (lispm-ui-text-cjk-family))
+    ;; lispm-ui-controls.el
+    (push-buttons
+     (let ((palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (mapcar (lambda (options) (lispm-ui-golden--print (apply #'lispm-ui-draw-push-button palette "OK" 60 options)))
+               '(() (:state pressed) (:state disabled) (:default t) (:focused t) (:default t :focused t)
+                 (:default t :state disabled) (:pad 5)))))
+    (popup-buttons
+     (let ((palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
+       (mapcar (lambda (options) (lispm-ui-golden--print (apply #'lispm-ui-draw-popup-button palette "Choice" 100 options)))
+               '(() (:state pressed) (:state disabled) (:focused t) (:pad 4)))))
+    (bevel-buttons
+     (let ((palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (mapcar (lambda (options) (lispm-ui-golden--print (apply #'lispm-ui-draw-bevel-button palette 40 20 options)))
+               '(() (:state pressed) (:state disabled) (:label "Go") (:label "Go" :face lispm-ui-title)))))
+    (radios
+     (let ((palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (mapcar (lambda (options) (lispm-ui-golden--print (apply #'lispm-ui-draw-radio palette options)))
+               '((nil) (t) (t :state pressed) (t :state disabled) (nil :focused t) (t :pad 2)))))
+    (check-boxes
+     (let ((palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
+       (mapcar (lambda (options) (lispm-ui-golden--print (apply #'lispm-ui-draw-check-box palette options)))
+               '((nil) (t) (t :state pressed) (t :state disabled) (nil :focused t) (t :pad 2)))))
+    (list-check-boxes
+     (let ((palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (mapcar (lambda (state) (lispm-ui-golden--print (lispm-ui-draw-list-check-box palette state)))
+               '(on off mixed))))
+    (group-boxes
+     (let ((palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (list (lispm-ui-golden--print (lispm-ui-draw-group-edge palette 120 "Group"))
+             (lispm-ui-golden--print (lispm-ui-draw-group-edge palette 120))
+             (lispm-ui-golden--print (lispm-ui-draw-group-edge palette 120 nil t))
+             (lispm-ui-golden--print (lispm-ui-draw-group-side palette 16)))))
+    (focus-ring
+     (lispm-ui-golden--svg 40 30 (lambda (svg)
+                                   (lispm-ui-svg-focus-ring svg 4 4 20 12 3
+                                                            (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))))
+    (pixel-map
+     (lispm-ui-golden--svg 10 10 (lambda (svg)
+                                   (lispm-ui-svg-pixel-map svg 1 1 '("OOx.." ".LLLO") '((?O . "#000000") (?L . "#FFFFFF"))))))
+    (control-widths
+     (list (mapcar #'lispm-ui-push-button-width '("OK" "Don’t Save" "A rather longer label than most"))
+           (mapcar #'lispm-ui-popup-button-width '("A" "Medium choice" "A rather longer choice than most"))
+           lispm-ui-button-height lispm-ui-group-title-height lispm-ui-bevel-padding))
+    (control-colors
+     (let ((palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
+       (list (mapcar (lambda (state) (lispm-ui-push-button-colors palette state)) '(nil pressed disabled))
+             (mapcar (lambda (state) (lispm-ui-bevel-button-colors palette state)) '(nil pressed disabled)))))
+    (controls-as-text
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (mapcar #'lispm-ui-golden--intervals
+               (list (lispm-ui-text-button "OK") (lispm-ui-text-button "OK" 'disabled)
+                     (lispm-ui-text-button "OK" 'pressed) (lispm-ui-text-button "OK" nil t)
+                     (lispm-ui-text-control "[ ]" t) (lispm-ui-text-control "[ ]" nil 'disabled)
+                     (lispm-ui-text-control "[ ]")))))
+    (controls-as-strings
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (mapcar #'lispm-ui-golden--intervals
+               (list (lispm-ui-push-button "OK" :default t) (lispm-ui-push-button "Cancel" :focused t)
+                     (lispm-ui-popup-button "Choice" :state 'pressed) (lispm-ui-radio t nil t)
+                     (lispm-ui-check-box nil 'disabled) (lispm-ui-list-check-box 'mixed)
+                     (lispm-ui-bevel-button "Go" 'pressed 24) (lispm-ui-group-edge 100 "Box")
+                     (lispm-ui-group-side 18))))))
   "The cases compared, (NAME FORM) each, FORM in LispM UI's names.")
 
 (defun lispm-ui-golden--rename (form names)
@@ -235,6 +360,7 @@ font installed."
   "Write what the desktop's functions make of `lispm-ui-golden-cases' to
 `lispm-ui-golden-file'.  Run with the desktop's lisp/ on the load path."
   (require 'lispm-desktop-platinum-draw)
+  (require 'lispm-desktop-platinum-controls)
   (require 'lispm-desktop-look)
   (require 'lispm-desktop-i18n)
   (let ((names (mapcar (pcase-lambda (`(,new . ,old)) (cons new old)) lispm-ui-golden-names))

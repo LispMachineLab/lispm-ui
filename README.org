@@ -16,12 +16,29 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-look.el=    | the looks it draws in, each the forms of one system's interface, and families of looks drawn alike                      |
 | =lispm-ui-text.el=    | text laid out in pixels: widths, fitting with an ellipsis, aligning, breaking lines, Chinese and Japanese type          |
 | =lispm-ui-draw.el=    | what it draws with: SVG primitives, text and pictures drawn as Emacs shows them, and the cache of drawn images          |
+| =lispm-ui-controls.el= | its controls: push buttons and the default one's ring, pop-up menus, bevel buttons, radio buttons, check boxes, group boxes |
 | =lispm-ui-modal.el=   | what its modal panels share: reading events without quitting, what each key does, focus rings, holding a control pressed |
 | =lispm-ui-ask.el=     | asking a person: an alert, a question to agree to, a choice, a file                                                      |
 | =lispm-ui-form.el=    | forms, written as data                                                                                                   |
 
-=lispm-ui.el= loads every part.  More come as LispM's interface moves here: drawn controls, alerts,
-menus, and a dialog choosing a file.
+=lispm-ui.el= loads every part.  More come as LispM's interface moves here: alerts, menus, and a
+dialog choosing a file.
+
+* Controls
+
+Each control is drawn as SVG by a generic function, as ~lispm-ui-draw-push-button~, in the colours
+of the palette; as a string displaying it, as ~lispm-ui-push-button~, to put on a line, which a text
+terminal shows as text; and as a button inserted in a buffer, as ~lispm-ui-insert-push-button~:
+
+#+begin_src emacs-lisp
+(lispm-ui-insert-push-button "Save" #'save-buffer :default t)
+(lispm-ui-insert-check-box "Wrap lines" visual-line-mode #'visual-line-mode)
+(lispm-ui-insert-popup-button "Red" '((red . "Red") (blue . "Blue")) #'my-set-colour :current 'red)
+#+end_src
+
+=TAB= and =S-TAB= go from one to the next, as buttons do; the one point is on is drawn ringed when
+~lispm-ui-show-focus~ runs from ~post-command-hook~, and =RET= or =SPC= presses it, drawn pushed in
+as it is.
 
 * Colours and looks
 
@@ -95,7 +112,9 @@ with a checkout of LispM Kit beside this one, or where =LISPM_KIT= says.
 =make i18n= lists the messages each catalog lacks, and those it holds that the code no longer
 gives.  The palettes, drawings and lines LispM UI makes are those LispM's desktop made before
 they moved here, which =test/golden.eld= keeps: =make golden LISPM_DESKTOP=…= writes it again from a
-checkout of the desktop from then (see =test/lispm-ui-golden.el=).
+checkout of the desktop from then (see =test/lispm-ui-golden.el=).  =make gallery= draws every
+control in each of its states, light and dark, in =gallery/=, with =gallery/index.html= to look at
+them in a browser.
 
 * License
 

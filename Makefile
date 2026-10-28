@@ -6,7 +6,7 @@ LISPM_KIT ?= ../lispm-kit
 
 FILES = $(wildcard *.el)
 
-.PHONY: all test compile i18n golden
+.PHONY: all test compile i18n golden gallery
 
 all: test compile
 
@@ -30,4 +30,9 @@ i18n:
 # drew for it: see test/lispm-ui-golden.el.
 golden:
 	@test -n "$(LISPM_DESKTOP)" || { echo "Say where LispM Desktop's lisp/ is: make golden LISPM_DESKTOP=..."; exit 2; }
-	$(EMACS) -Q --batch -L $(LISPM_KIT) -L $(LISPM_DESKTOP) -l test/lispm-ui-golden.el -f lispm-ui-golden-write
+	$(EMACS) -Q --batch -L $(LISPM_KIT) -L . -L $(LISPM_DESKTOP) -l test/lispm-ui-golden.el -f lispm-ui-golden-write
+
+# Every control drawn, in each of its states, as SVG in gallery/ (or where
+# GALLERY says), with gallery/index.html showing them: to look at.
+gallery:
+	$(EMACS) -Q --batch -L . -L $(LISPM_KIT) -l test/lispm-ui-gallery.el -f lispm-ui-gallery-write

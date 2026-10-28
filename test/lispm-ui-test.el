@@ -327,6 +327,25 @@ palette, and apart for each look; the cache is emptied past 512 images."
       (lispm-ui-image '(dot 2) #'draw)
       (should (= (hash-table-count lispm-ui--images) 1)))))
 
+(ert-deftest lispm-ui-test-svg-named-twice ()
+  "An SVG an editor wrote, an attribute of its own named as one of SVG's
+once the parser drops its namespace, is embedded with each attribute
+once, its own first, so that the picture is still a document."
+  (skip-unless (fboundp 'libxml-parse-xml-region))
+  (let* ((lispm-ui--svg-doms (make-hash-table :test #'equal))
+         (dom (lispm-ui-svg-dom nil (concat "<svg xmlns=\"http://www.w3.org/2000/svg\""
+                                            " xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\""
+                                            " version=\"1.1\" inkscape:version=\"0.48.4\" width=\"4\">"
+                                            "<rect width=\"4\" height=\"4\"/></svg>")))
+         (svg (svg-create 8 8)))
+    (should (equal (seq-filter (lambda (attribute) (eq (car attribute) 'version)) (dom-attributes dom))
+                   '((version . "1.1"))))
+    (lispm-ui-svg-embed svg dom 0 0 8 8)
+    (with-temp-buffer
+      (svg-print svg)
+      (should (= (how-many "version=" (point-min) (point-max)) 2))
+      (should (libxml-parse-xml-region (point-min) (point-max))))))
+
 ;;;; lispm-ui-controls
 
 (defmacro lispm-ui-test--with-controls (&rest body)

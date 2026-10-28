@@ -19,6 +19,9 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-raster.el=  | pictures drawn in text, in block characters, and as PNGs, for text terminals                                            |
 | =lispm-ui-icons.el=   | icons found by name: an interface's own, through a hook, and those its alerts show                                      |
 | =lispm-ui-controls.el= | its controls: push buttons and the default one's ring, pop-up menus, bevel buttons, radio buttons, check boxes, group boxes |
+| =lispm-ui-list.el=    | lists' column headings, the column sorted by pushed in, and disclosure triangles                                      |
+| =lispm-ui-scroll.el=  | scroll bars: where the thumb stands for what shows, and the bar drawn                                                  |
+| =lispm-ui-window.el=  | windows' title bars, laid out and drawn, as a dialog's title                                                           |
 | =lispm-ui-modal.el=   | what its modal panels share: reading events without quitting, what each key does, focus rings, holding a control pressed |
 | =lispm-ui-ask.el=     | asking a person: an alert, a question to agree to, a choice, a file                                                      |
 | =lispm-ui-popup.el=   | panels popped up over a frame, in child frames, holding their size                                                      |
@@ -81,9 +84,28 @@ A form is written as data, a title and its fields, and drawn as a dialog with Em
   :on-submit (lambda (values) (message "%S" values)))
 #+end_src
 
-Fields are of the types ~lispm-ui-form-types~ lists: text, text areas, pictures, pop-up menus,
-radio buttons, check boxes, rows of buttons and headings that start a group.  =TAB= goes from field
-to field, =C-c C-c= submits, =C-c C-k= cancels.  Once LispM UI has a palette, a form is dressed
+Fields are of the types ~lispm-ui-form-types~ lists: text, passwords, text areas, pictures, pop-up
+menus, radio buttons, check boxes, rows of buttons, lists of things a row each with buttons of
+their own, statuses, and headings that start a group.  =TAB= goes from field to field, =C-c C-c=
+submits, =C-c C-k= cancels.
+
+A field's =:on-change= is called each time it is changed, and may change the others with
+~lispm-ui-form-set~, which says a status again where it stands, as how a connection went, the rest
+of the form left as it is.  A form made =:instant= applies each change as it is made, as an
+application's settings do, with no Cancel button:
+
+#+begin_src emacs-lisp
+(lispm-ui-form "Mail Settings"
+  `((reading :type heading :label "Reading")
+    (html :type check :text "Show HTML when a message has it" :value ,my-prefer-html
+          :on-change ,(lambda (on) (customize-save-variable 'my-prefer-html on))))
+  :instant t
+  :submit "Done"
+  :mode #'my-settings-mode)
+#+end_src
+
+=:mode= puts the form in a mode of its own, derived from ~lispm-ui-form-mode~, for its keys and
+menus, and =:setup= sets its buffer up before it is drawn.  Once LispM UI has a palette, a form is dressed
 in its look: its buttons, check boxes, radio buttons and pop-up menus are LispM UI's controls, its
 groups framed in group boxes, its fields in the content's colour on the chrome's ground, and what the
 keyboard is on ringed in the focus colour; without one it is drawn as text.  An application drawing a form with

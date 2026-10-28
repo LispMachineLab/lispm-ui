@@ -11,6 +11,7 @@
   ("OK" . "OK")
   ("Choose a File" . "Choisir un fichier")
   ("%s:" . "%s :")
+  ("TAB goes to the next field · changes take effect at once · C-c C-c closes" . "TAB : champ suivant · les modifications prennent effet aussitôt · C-c C-c ferme")
   ("TAB goes to the next field · C-c C-c %s · C-c C-k cancels" . "TAB : champ suivant · C-c C-c %s · C-c C-k annule")
   ("Choose…" . "Choisir…")
   ("No picture" . "Aucune image")

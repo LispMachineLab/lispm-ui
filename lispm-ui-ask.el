@@ -96,7 +96,8 @@ answers in the minibuffer."
 ICON is `caution', `stop' or `note'; DETAIL is a line or two under
 MESSAGE.  BUTTONS is a list of (LABEL VALUE ROLE KEYS...): ROLE
 `default' marks the button Return presses, `cancel' the one Escape
-does; KEYS are events pressing a button too.  Shown by
+does, its VALUE not nil, as an alert may take a Cancel worth nil for
+none; KEYS are events pressing a button too.  Shown by
 `lispm-ui-alert-function', else asked in the minibuffer, a letter a
 button, quitting choosing the cancel button."
   (if lispm-ui-alert-function
@@ -120,11 +121,13 @@ default button of the alert asking, by default OK, beside Cancel.
 Where no alert is shown, see `lispm-ui--alert-shown-p', `yes-or-no-p'
 asks."
   (if (lispm-ui--alert-shown-p)
+      ;; Cancel is worth something: an alert may take a Cancel worth nil
+      ;; for none, and Escape then would press the default.
       (eq (lispm-ui-alert 'caution question
-                          `((,(lispm-ui-tr "Cancel") nil cancel)
-                            (,(or action (lispm-ui-tr "OK")) t default))
+                          `((,(lispm-ui-tr "Cancel") cancel cancel)
+                            (,(or action (lispm-ui-tr "OK")) agree default))
                           detail)
-          t)
+          'agree)
     (let ((use-dialog-box nil))
       (yes-or-no-p (concat question (and detail (concat " " detail)) " ")))))
 

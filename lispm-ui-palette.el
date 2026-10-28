@@ -90,6 +90,25 @@ before one is.  See `lispm-ui-derive-palette'.")
 (defvar lispm-ui-palette-generation 0
   "Count of palettes derived so far; memoized drawings carry it in their key.")
 
+(defconst lispm-ui-palette-darkest 0.12
+  "The least luminance a palette's chrome and frames are derived from.
+They are darker than the content, and a bevel's shaded edge and a
+control's outline darker still; a theme on black has no darker to give,
+so its content is lifted toward its text until it is this light, and
+they are derived from that.")
+
+(defun lispm-ui--palette-ground (content text)
+  "Return what a palette's chrome and frames are derived from: CONTENT, or,
+darker than `lispm-ui-palette-darkest', CONTENT lifted toward TEXT until
+it is as light as that."
+  (let ((low (lispm-ui-luminance content))
+        (high (lispm-ui-luminance text)))
+    (if (or (null (lispm-ui-rgb content))
+            (>= low lispm-ui-palette-darkest)
+            (<= high lispm-ui-palette-darkest))
+        content
+      (lispm-ui-blend content text (/ (- lispm-ui-palette-darkest low) (- high low))))))
+
 (defun lispm-ui-derive-palette (content text dim accent)
   "Return the palette for a theme drawing CONTENT, TEXT, DIM and ACCENT.
 CONTENT and TEXT are the editor's background and foreground, DIM its
@@ -97,7 +116,9 @@ dimmed text, ACCENT its highlight colour.  The chrome is the content a
 shade darker; a bevel's lit edge leans toward the text, its shaded edge
 toward black, and frames are darker still; controls are outlined in
 near black.  The desktop behind the windows is the content tinted with
-the accent.
+the accent.  A theme darker than `lispm-ui-palette-darkest', as one on
+black, has its chrome and frames derived from its content lifted toward
+its text, so that a control's dark edges stand out from them.
 
 As Mac OS 9's variation colour was a ramp, so is the accent: menus are
 highlighted in it darkened, scroll thumbs are it lightened, and the
@@ -109,9 +130,10 @@ Other looks than the classic one draw a few more parts: active captions
 :title-inactive-text) in the chrome, sizing borders (:border,
 :border-inactive) in the chrome, menus (:menu, :menu-text) on the
 document's ground."
-  (let* ((chrome (lispm-ui-blend content "#000000" 0.25))
+  (let* ((ground (lispm-ui--palette-ground content text))
+         (chrome (lispm-ui-blend ground "#000000" 0.25))
          (light (lispm-ui-blend chrome text 0.3))
-         (outline (lispm-ui-blend content "#000000" 0.85))
+         (outline (lispm-ui-blend ground "#000000" 0.85))
          (highlight (lispm-ui-blend accent "#000000" 0.4))
          (palette (list :content content :text text :dim dim :accent accent
                         :chrome chrome :light light :outline outline)))
@@ -120,7 +142,7 @@ document's ground."
      (list :desktop (lispm-ui-blend content accent 0.25)
            :header (lispm-ui-blend chrome content 0.5)
            :shade (lispm-ui-blend chrome "#000000" 0.6)
-           :frame (lispm-ui-blend content "#000000" 0.65)
+           :frame (lispm-ui-blend ground "#000000" 0.65)
            :muted (lispm-ui-blend dim text 0.35)
            :highlight highlight
            :highlight-dark (lispm-ui-blend highlight "#000000" 0.45)
@@ -179,6 +201,10 @@ drew it with, and a theme of other colours gets their counterparts."
   "Face of the system font: titles, push buttons, menus."
   :group 'lispm-ui)
 
+(defface lispm-ui-title-inactive '((t :weight bold :inherit shadow))
+  "Face of an inactive window's title: the system font, greyed."
+  :group 'lispm-ui)
+
 (defface lispm-ui-list nil
   "Face of the application font: lists, labels and fields."
   :group 'lispm-ui)
@@ -210,11 +236,16 @@ look's families."
   (let ((text (lispm-ui-color :text))
         (chrome (lispm-ui-color :chrome)))
     (set-face-attribute 'lispm-ui-title nil :foreground text)
+    (set-face-attribute 'lispm-ui-title-inactive nil
+                        :foreground (lispm-ui-color :muted) :inherit 'unspecified)
     (set-face-attribute 'lispm-ui-small nil :inherit 'lispm-ui-list :height 90 :weight 'normal)
+    ;; A field is drawn over a theme's own `widget-field': none of the
+    ;; lines that theme draws about it are its.
     (set-face-attribute 'lispm-ui-field nil
                         :inherit 'lispm-ui-list :background (lispm-ui-color :content)
                         :foreground text
-                        :box `(:line-width (1 . 1) :color ,(lispm-ui-color :outline)))
+                        :box `(:line-width (1 . 1) :color ,(lispm-ui-color :outline))
+                        :underline nil :overline nil :strike-through nil)
     ;; Emacs draws one box about text, so the ring stands for the frame
     ;; within it while the field has the keyboard.
     (set-face-attribute 'lispm-ui-field-focused nil

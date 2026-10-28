@@ -250,18 +250,24 @@ anchor, by default the middle."
 (defun lispm-ui--clean-dom (node)
   "Return NODE, parsed XML, ready to be printed again by `svg-print':
 comments dropped, text and attribute values escaped, which `svg-print'
-writes as they are."
+writes as they are.  An attribute named twice is kept once, as first
+named: the parser drops a name's namespace, so an editor's own, as
+Inkscape's inkscape:version, comes back named as one of SVG's, and a
+document naming an attribute twice is no document."
   (cond ((stringp node) (lispm-ui--escape-xml node))
         ((memq (car-safe node) '(comment top)) nil)
         ((consp node)
-         `(,(car node)
-           ,(mapcar (lambda (attribute)
-                      (cons (car attribute)
-                            (if (stringp (cdr attribute))
-                                (lispm-ui--escape-xml (cdr attribute))
-                              (cdr attribute))))
-                    (nth 1 node))
-           ,@(delq nil (mapcar #'lispm-ui--clean-dom (nthcdr 2 node)))))))
+         (let ((named nil))
+           `(,(car node)
+             ,(delq nil (mapcar (lambda (attribute)
+                                  (unless (memq (car attribute) named)
+                                    (push (car attribute) named)
+                                    (cons (car attribute)
+                                          (if (stringp (cdr attribute))
+                                              (lispm-ui--escape-xml (cdr attribute))
+                                            (cdr attribute)))))
+                                (nth 1 node)))
+             ,@(delq nil (mapcar #'lispm-ui--clean-dom (nthcdr 2 node))))))))
 
 (defun lispm-ui-svg-dom (file &optional data)
   "Return the SVG document of FILE, or of the string DATA, or nil.
@@ -279,9 +285,24 @@ printed again, see `lispm-ui--clean-dom'."
               (setq dom (seq-find (lambda (node) (eq (car-safe node) 'svg)) (nthcdr 2 dom))))
             (and dom (lispm-ui--clean-dom dom))))))))
 
+(defun lispm-ui--svg-length (value)
+  "Return VALUE, an SVG length, as a number of pixels, or nil when it is in
+other units or none."
+  (when (and (stringp value)
+             (string-match "\\`[ \t]*\\([0-9]*\\.?[0-9]+\\)[ \t]*\\(?:px\\)?[ \t]*\\'" value))
+    (string-to-number (match-string 1 value))))
+
 (defun lispm-ui-svg-embed (svg dom x y width height)
-  "Draw the SVG document DOM on SVG at X, Y, WIDTH by HEIGHT pixels."
+  "Draw the SVG document DOM on SVG at X, Y, WIDTH by HEIGHT pixels.
+A document sized in pixels without a viewBox is scaled to that size, as
+one with a viewBox is, not cut to it."
   (let ((copy (copy-tree dom)))
+    (unless (dom-attr copy 'viewBox)
+      (let ((own-width (lispm-ui--svg-length (dom-attr copy 'width)))
+            (own-height (lispm-ui--svg-length (dom-attr copy 'height))))
+        (when (and own-width own-height
+                   (not (and (= own-width width) (= own-height height))))
+          (dom-set-attribute copy 'viewBox (format "0 0 %s %s" own-width own-height)))))
     (dom-set-attribute copy 'x x)
     (dom-set-attribute copy 'y y)
     (dom-set-attribute copy 'width width)

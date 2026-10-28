@@ -132,7 +132,7 @@ Emacs's widgets where Emacs is of another version than wrote them."
     (setq golden (assq-delete-all :emacs golden))
     (should (equal (mapcar #'car golden) (mapcar #'car lispm-ui-golden-cases)))
     (pcase-dolist (`(,name ,form) lispm-ui-golden-cases)
-      (unless (or (and (memq name '(dom embed content-image))
+      (unless (or (and (memq name lispm-ui-golden-xml-cases)
                        (not (fboundp 'libxml-parse-xml-region)))
                   (and (memq name lispm-ui-golden-widget-cases)
                        (not (eql emacs emacs-major-version))))
@@ -307,6 +307,265 @@ palette, and apart for each look; the cache is emptied past 512 images."
       (dotimes (i 520) (puthash (list 'filler i) t lispm-ui--images))
       (lispm-ui-image '(dot 2) #'draw)
       (should (= (hash-table-count lispm-ui--images) 1)))))
+
+;;;; lispm-ui-raster
+
+(defun lispm-ui-test--svg (string)
+  "Return the SVG document STRING parsed."
+  (with-temp-buffer
+    (insert string)
+    (libxml-parse-xml-region (point-min) (point-max))))
+
+(ert-deftest lispm-ui-test-raster-rectangles ()
+  "An icon of rectangles comes out pixel for pixel at its own size, and at
+half its size each pixel the average of the four it stands for; what no
+shape covers is clear."
+  (skip-unless (fboundp 'libxml-parse-xml-region))
+  (let ((dom (lispm-ui-test--svg
+              "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\" viewBox=\"0 0 4 4\">
+                 <rect x=\"0\" y=\"0\" width=\"2\" height=\"2\" fill=\"#FF0000\"/>
+                 <rect x=\"2\" y=\"0\" width=\"2\" height=\"1\" fill=\"#0000FF\"/>
+                 <rect x=\"2\" y=\"1\" width=\"2\" height=\"1\" fill=\"#FFFFFF\"/>
+                 <rect x=\"0\" y=\"2\" width=\"4\" height=\"2\" fill=\"#00FF00\" display=\"none\"/>
+               </svg>")))
+    (let ((pixels (lispm-ui-raster-dom dom 4)))
+      (should (equal (aref pixels 0) ["#ff0000" "#ff0000" "#0000ff" "#0000ff"]))
+      (should (equal (aref pixels 1) ["#ff0000" "#ff0000" "#ffffff" "#ffffff"]))
+      (should (equal (aref pixels 2) [nil nil nil nil])))
+    (let ((pixels (lispm-ui-raster-dom dom 2)))
+      (should (equal (aref pixels 0) ["#ff0000" "#8080ff"]))
+      (should (equal (aref pixels 1) [nil nil])))))
+
+(ert-deftest lispm-ui-test-raster-crisp ()
+  "An icon asking for crisp edges keeps its colours at half its size: each
+pixel takes the colour covering most of the four it stands for, the
+darker of two covering as much, so a pixel-wide outline survives, but
+the lighter amid the darker, so what close outlines outline survives."
+  (skip-unless (fboundp 'libxml-parse-xml-region))
+  (let ((pixels (lispm-ui-raster-dom
+                 (lispm-ui-test--svg
+                  "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\" viewBox=\"0 0 4 4\" shape-rendering=\"crispEdges\">
+                     <rect x=\"0\" y=\"0\" width=\"2\" height=\"2\" fill=\"#000000\"/>
+                     <rect x=\"1\" y=\"1\" width=\"1\" height=\"1\" fill=\"#FFFFFF\"/>
+                     <rect x=\"2\" y=\"0\" width=\"2\" height=\"1\" fill=\"#0000FF\"/>
+                     <rect x=\"2\" y=\"1\" width=\"2\" height=\"1\" fill=\"#FFFFFF\"/>
+                   </svg>")
+                 2)))
+    (should (equal (aref pixels 0) ["#000000" "#0000ff"]))
+    (should (equal (aref pixels 1) [nil nil])))
+  (let ((pixels (lispm-ui-raster-dom
+                 (lispm-ui-test--svg
+                  "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\" viewBox=\"0 0 4 4\" shape-rendering=\"crispEdges\">
+                     <rect x=\"0\" y=\"0\" width=\"4\" height=\"4\" fill=\"#000000\"/>
+                     <rect x=\"1\" y=\"0\" width=\"1\" height=\"2\" fill=\"#FFFFFF\"/>
+                   </svg>")
+                 2)))
+    (should (equal (aref pixels 0) ["#ffffff" "#000000"]))))
+
+(ert-deftest lispm-ui-test-raster-shapes ()
+  "Paths are filled, their arcs followed; a circle is round; an outline
+stays a pixel wide however small the icon, and one of no width is none."
+  (skip-unless (fboundp 'libxml-parse-xml-region))
+  (let ((pixels (lispm-ui-raster-dom
+                 (lispm-ui-test--svg
+                  "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\">
+                     <path d=\"M0 0H8L0 8Z\" fill=\"#000000\"/>
+                   </svg>")
+                 8)))
+    ;; The upper left triangle: the corner in, the opposite corner out.
+    (should (aref (aref pixels 0) 0))
+    (should (aref (aref pixels 0) 6))
+    (should-not (aref (aref pixels 7) 7)))
+  (let ((pixels (lispm-ui-raster-dom
+                 (lispm-ui-test--svg
+                  "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\">
+                     <path d=\"M0 4A4 4 0 0 1 8 4A4 4 0 0 1 0 4Z\" style=\"fill:#0000ff\"/>
+                   </svg>")
+                 8)))
+    (should (equal (aref (aref pixels 4) 4) "#0000ff"))
+    (should (aref (aref pixels 0) 4))
+    (should-not (aref (aref pixels 0) 0)))
+  (cl-flet ((outlined (width)
+              (lispm-ui-raster-dom
+               (lispm-ui-test--svg
+                (format "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
+                           <rect x=\"8\" y=\"8\" width=\"48\" height=\"48\" fill=\"none\"
+                                 stroke=\"#000000\" stroke-width=\"%s\"/>
+                         </svg>" width))
+               8)))
+    (should (equal (aref (aref (outlined "1") 1) 4) "#000000"))
+    (should-not (aref (aref (outlined "0") 1) 4))))
+
+(ert-deftest lispm-ui-test-text-picture ()
+  "Pixels are drawn 2 by 4 a cell, in the block character and two of
+their colours that draw them closest: one colour a blank on it, halves
+the half blocks; what is clear keeps no colour where the character can
+leave it so, and is the background where it cannot.  Darkened, every
+colour is at half its brightness."
+  (let* ((r "#ff0000") (b "#0000ff")
+         (lines (lispm-ui-text-picture
+                 (vector (vector r r r r nil nil r b nil nil)
+                         (vector r r r r nil nil r b nil nil)
+                         (vector r r nil nil b b r b nil nil)
+                         (vector r r nil nil b b r b nil nil))
+                 nil "#000000")))
+    (should (equal (mapcar #'substring-no-properties lines) '(" ▀▄▌ ")))
+    (should (equal (get-text-property 0 'face (car lines)) `(:background ,r)))
+    (should (equal (get-text-property 1 'face (car lines)) `(:foreground ,r)))
+    (should (equal (get-text-property 2 'face (car lines)) `(:foreground ,b)))
+    (should (equal (get-text-property 3 'face (car lines)) `(:foreground ,r :background ,b)))
+    (should-not (get-text-property 4 'face (car lines))))
+  (let ((line (car (lispm-ui-text-picture
+                    [["#00ff00" "#00ff00"] ["#00ff00" "#00ff00"] ["#00ff00" "#00ff00"] [nil nil]]
+                    nil "#123456"))))
+    (should (equal line "▂"))
+    (should (equal (get-text-property 0 'face line) '(:foreground "#123456" :background "#00ff00"))))
+  (should (equal (get-text-property 0 'face (car (lispm-ui-text-picture
+                                                  [["#ff0000" "#ff0000"] ["#ff0000" "#ff0000"]
+                                                   ["#ff0000" "#ff0000"] ["#ff0000" "#ff0000"]]
+                                                  t)))
+                 '(:background "#800000"))))
+
+(ert-deftest lispm-ui-test-raster-png ()
+  "Pixels make an opaque PNG: its chunks summed right, the pixels each a
+square SCALE wide in the middle, the rest the background, clear pixels
+too."
+  (should (= (lispm-ui-raster--crc "IEND") #xAE426082))
+  (let* ((png (lispm-ui-raster-png [["#ff0000" nil] [nil "#0000ff"]] 2 6 4 "#00ff00"))
+         (data-at (string-search "IDAT" png))
+         (length (string-to-number (mapconcat (lambda (byte) (format "%02x" byte))
+                                              (substring png (- data-at 4) data-at) "")
+                                   16))
+         (raw (with-temp-buffer
+                (set-buffer-multibyte nil)
+                (insert (substring png (+ data-at 4) (+ data-at 4 length)))
+                ;; An Emacs built without zlib has none of it.
+                (and (fboundp 'zlib-available-p) (zlib-available-p)
+                     (zlib-decompress-region (point-min) (point-max))
+                     (buffer-string)))))
+    (should (string-prefix-p "\x89PNG\r\n\x1a\n" png))
+    (should-not (multibyte-string-p png))
+    (should (equal (substring png 16 24) (unibyte-string 0 0 0 6 0 0 0 4)))
+    (should (string-suffix-p (unibyte-string #xAE #x42 #x60 #x82) png))
+    (when raw
+      ;; Each row: no filter, then 6 pixels; the picture 4 by 4 from x 1.
+      (should (= (length raw) (* 4 (1+ (* 3 6)))))
+      (cl-flet ((pixel (x y) (let ((at (+ (* y 19) 1 (* 3 x)))) (append (substring raw at (+ at 3)) nil))))
+        (should (equal (pixel 0 0) '(0 255 0)))
+        (should (equal (pixel 1 0) '(255 0 0)))
+        (should (equal (pixel 2 1) '(255 0 0)))
+        (should (equal (pixel 3 0) '(0 255 0)))
+        (should (equal (pixel 4 3) '(0 0 255)))
+        (should (equal (pixel 5 3) '(0 255 0)))))))
+
+(ert-deftest lispm-ui-test-text-compose ()
+  "Pieces of text stand where they are put on blank lines as wide as asked,
+cut at the right edge."
+  (should (equal (lispm-ui-text-compose 8 3 '((0 2 "ab") (2 0 "x") (2 6 "long")))
+                 '("  ab    " "        " "x     lo"))))
+
+(ert-deftest lispm-ui-test-raster-icon-color ()
+  "Where only a character's room is left, an icon is drawn in the colour it
+is drawn in most, greys only where it has no other: the caution sign in
+its yellow, the note in its white."
+  (skip-unless (fboundp 'libxml-parse-xml-region))
+  (should (equal (lispm-ui-raster-color (lispm-ui-raster (lispm-ui-icon-file 'caution) 16)) "#ffe863"))
+  (should (equal (lispm-ui-raster-color (lispm-ui-raster (lispm-ui-icon-file 'note) 16)) "#ffffff"))
+  (should-not (lispm-ui-raster (expand-file-name "no-such-icon.svg" lispm-ui-directory) 16))
+  (should-not (lispm-ui-raster-color [[nil nil] [nil nil]])))
+
+;;;; lispm-ui-icons
+
+(ert-deftest lispm-ui-test-icon-file ()
+  "An icon is found by its name: an absolute file name is itself; the
+functions of `lispm-ui-icon-functions' are asked first, in turn; else it
+is LispM UI's own, as the alerts' icons are."
+  (let ((lispm-ui-icon-functions nil))
+    (dolist (icon '(caution stop note))
+      (should (file-readable-p (lispm-ui-icon-file icon)))
+      (should (equal (lispm-ui-icon-file icon)
+                     (expand-file-name (format "icons/%s.svg" icon) lispm-ui-directory))))
+    (should (equal (lispm-ui-icon-file "/apps/ada/icon.png") "/apps/ada/icon.png"))
+    (should (string-suffix-p "/emacs.svg" (lispm-ui-icon-file 'emacs)))
+    (let ((lispm-ui-icon-functions
+           (list (lambda (name) (and (equal name "folder") "/looks/folder.svg"))
+                 (lambda (name) (and (member name '("folder" "trash")) "/os/trash.svg")))))
+      (should (equal (lispm-ui-icon-file "folder") "/looks/folder.svg"))
+      (should (equal (lispm-ui-icon-file "trash") "/os/trash.svg"))
+      (should (equal (lispm-ui-icon-file 'caution)
+                     (expand-file-name "icons/caution.svg" lispm-ui-directory)))
+      (should (equal (lispm-ui-icon-file "/apps/ada/icon.png") "/apps/ada/icon.png")))
+    (let ((lispm-ui-icon-functions (list (lambda (name) (and (equal name "document") "/os/document.svg"))))
+          (data-directory "/nowhere/"))
+      (should (equal (lispm-ui-icon-file 'emacs) "/os/document.svg")))))
+
+(ert-deftest lispm-ui-test-icon-source ()
+  "An icon drawn sixteen pixels a side is drawn from its own sixteen-pixel
+drawing where it has one beside its thirty-two-pixel one."
+  (let* ((directory (make-temp-file "lispm-ui-icons" t))
+         (lispm-ui-icon-functions
+          (list (lambda (name) (expand-file-name (format "%s.svg" name) directory)))))
+    (unwind-protect
+        (progn
+          (dolist (file '("trash.svg" "trash-32.svg" "globe-32.svg"))
+            (with-temp-file (expand-file-name file directory)
+              (insert "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"/>")))
+          (should (equal (lispm-ui--icon-source "trash-32" 16) (expand-file-name "trash.svg" directory)))
+          (should (equal (lispm-ui--icon-source "trash-32" 32) (expand-file-name "trash-32.svg" directory)))
+          (should (equal (lispm-ui--icon-source "globe-32" 16) (expand-file-name "globe-32.svg" directory)))
+          (should (equal (lispm-ui--icon-source (expand-file-name "trash-32.svg" directory) 16)
+                         (expand-file-name "trash.svg" directory))))
+      (delete-directory directory t))))
+
+(ert-deftest lispm-ui-test-icon ()
+  "An icon is a string a sixteen-pixel image shows, kept for the next time,
+or a blank as wide where images cannot be shown; in the list's face, so
+that a button it sits in does not underline it."
+  (let ((lispm-ui--icons (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) (image-type-available-p 'svg))))
+      (when (display-images-p)
+        (let ((icon (lispm-ui-icon 'caution)))
+          (should (equal icon " "))
+          (should (eq (get-text-property 0 'face icon) 'lispm-ui-list))
+          (should (eq (car (get-text-property 0 'display icon)) 'image))
+          (should (equal (plist-get (cdr (get-text-property 0 'display icon)) :height) 16))
+          (should (eq (get-text-property 0 'display (lispm-ui-icon 'caution))
+                      (get-text-property 0 'display icon))))))
+    (cl-letf (((symbol-function 'display-images-p) #'ignore))
+      (should (equal (get-text-property 0 'display (lispm-ui-icon 'caution)) '(space :width (16)))))))
+
+(ert-deftest lispm-ui-test-tty-text-icons ()
+  "On a text terminal an icon is a character a cell wide: the entry of
+`lispm-ui-text-icons' starting its name longest, else a dot; in the
+colour the icon is drawn in most, where it can be drawn."
+  (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+        (lispm-ui--icon-colors (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) t)))
+      (should (equal (lispm-ui-icon "folder-git-32") "▪"))
+      (should (equal (lispm-ui-icon "document-lisp") "λ"))
+      (should (equal (lispm-ui-icon "document-code") "▫"))
+      (should (equal (lispm-ui-icon 'emacs) "◆"))
+      (should (equal (lispm-ui-icon "/some/app/icon.svg") "·"))
+      (should (eq (get-text-property 0 'face (lispm-ui-icon "folder-git-32")) 'lispm-ui-list))
+      (when (fboundp 'libxml-parse-xml-region)
+        (should (equal (lispm-ui-icon 'stop) "×"))
+        (should (equal (get-text-property 0 'face (lispm-ui-icon 'stop))
+                       '(:inherit lispm-ui-list :foreground "#ce3131")))))))
+
+(ert-deftest lispm-ui-test-icon-picture ()
+  "On a text terminal an icon can be drawn in block characters, eight
+cells by four lines for sixteen pixels, darkened when selected; each is
+drawn once.  One that is no SVG cannot be drawn."
+  (skip-unless (fboundp 'libxml-parse-xml-region))
+  (let ((lispm-ui--icon-pictures (make-hash-table :test #'equal)))
+    (let ((picture (lispm-ui-icon-picture 'caution 16 nil "#DDDDDD")))
+      (should (= (length picture) 4))
+      (should (seq-every-p (lambda (line) (= (string-width line) 8)) picture))
+      (should (eq (lispm-ui-icon-picture 'caution 16 nil "#DDDDDD") picture))
+      (should-not (cl-every #'equal-including-properties
+                            (lispm-ui-icon-picture 'caution 16 t "#DDDDDD") picture)))
+    (should (equal (lispm-ui-text-size 16) '(8 . 4)))
+    (should-not (lispm-ui-icon-picture "/apps/ada/icon.png" 16))))
 
 ;;;; lispm-ui-controls
 

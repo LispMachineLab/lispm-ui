@@ -167,7 +167,26 @@
     (lispm-ui-form-group . lispm-desktop-form-group)
     (lispm-ui-form-redraw-all . lispm-desktop-form-redraw-all)
     (lispm-ui-form-text-area . lispm-desktop-form-text-area)
-    (lispm-ui-form-well-size . lispm-desktop-form-well-size))
+    (lispm-ui-form-well-size . lispm-desktop-form-well-size)
+    ;; lispm-ui-base.el
+    (lispm-ui-tty-p . lispm-desktop-tty-p)
+    ;; lispm-ui-raster.el
+    (lispm-ui-raster . lispm-desktop-platinum-raster)
+    (lispm-ui-raster-color . lispm-desktop-platinum-raster-color)
+    (lispm-ui-raster-darker . lispm-desktop-platinum--darker)
+    (lispm-ui-raster-dom . lispm-desktop-platinum-raster-dom)
+    (lispm-ui-raster-pixel-size . lispm-desktop-platinum-raster-pixel-size)
+    (lispm-ui-raster-png . lispm-desktop-platinum-raster-png)
+    (lispm-ui-raster-samples . lispm-desktop-platinum-raster-samples)
+    (lispm-ui-text-cell . lispm-desktop-platinum-text-cell)
+    (lispm-ui-text-compose . lispm-desktop-platinum-text-compose)
+    (lispm-ui-text-picture . lispm-desktop-platinum-text-picture)
+    (lispm-ui-text-size . lispm-desktop-platinum-text-size)
+    ;; lispm-ui-icons.el
+    (lispm-ui-icon . lispm-desktop-platinum-icon)
+    (lispm-ui-icon-file . lispm-desktop-platinum-icon-file)
+    (lispm-ui-icon-picture . lispm-desktop-platinum-icon-picture)
+    (lispm-ui-text-icon . lispm-desktop-platinum--text-icon))
   "LispM UI's names of what moved from LispM Desktop, (NEW . OLD) each:
 the renames LispM Desktop makes, the other way round.")
 
@@ -197,6 +216,50 @@ Emacs without SVG makes the image otherwise, of the same text."
   (if (eq (car-safe image) 'image)
       (list 'svg (plist-get (cdr image) :data))
     image))
+
+(defun lispm-ui-golden--xml (text)
+  "Return the SVG document TEXT parsed, as libxml2 parses it."
+  (with-temp-buffer
+    (insert text)
+    (libxml-parse-xml-region (point-min) (point-max))))
+
+(defconst lispm-ui-golden--shapes
+  (concat "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\""
+          " viewBox=\"0 0 32 32\">"
+          "<defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\">"
+          "<stop offset=\"0\" stop-color=\"#ff0000\"/><stop offset=\"100%\" style=\"stop-color:#0000ff\"/>"
+          "</linearGradient>"
+          "<linearGradient id=\"h\" xlink:href=\"#g\" gradientUnits=\"userSpaceOnUse\""
+          " x1=\"0\" y1=\"0\" x2=\"32\" y2=\"0\"/>"
+          "<radialGradient id=\"r\" cx=\"50%\" cy=\"50%\" r=\"50%\">"
+          "<stop offset=\"0\" stop-color=\"white\"/><stop offset=\"1\" stop-color=\"rgb(0,128,0)\" stop-opacity=\"0.5\"/>"
+          "</radialGradient></defs>"
+          "<rect x=\"1\" y=\"1\" width=\"30\" height=\"6\" fill=\"url(#g)\" stroke=\"#000\" stroke-width=\"1\"/>"
+          "<circle cx=\"8\" cy=\"16\" r=\"6\" fill=\"url(#r)\"/>"
+          "<ellipse cx=\"24\" cy=\"16\" rx=\"6\" ry=\"4\" fill=\"url(#h)\" opacity=\"0.75\"/>"
+          "<g fill=\"#336699\">"
+          "<path d=\"M2 22C4 18 8 18 10 22S16 26 18 22Q20 19 22 22T26 22L26 30H2Z\" fill-rule=\"evenodd\"/>"
+          "<path d=\"m4 24a2 2 0 1 0 4 0a2 2 0 1 0 -4 0z\" fill=\"#ffffff\"/>"
+          "</g>"
+          "<polygon points=\"26,22 31,31 21,31\" style=\"fill:#FF00FF;fill-opacity:0.5\"/>"
+          "<polyline points=\"20,20 24,24 20,28\" stroke=\"#00ffff\" stroke-width=\"2\" fill=\"red\"/>"
+          "<line x1=\"0\" y1=\"31\" x2=\"31\" y2=\"20\" stroke=\"#808080\"/>"
+          "<g opacity=\"0.5\"><rect x=\"14\" y=\"10\" width=\"4\" height=\"4\" fill=\"#000\"/></g>"
+          "<rect x=\"0\" y=\"0\" width=\"8\" height=\"8\" fill=\"#ff0000\" style=\"display:none\"/>"
+          "<text x=\"0\" y=\"10\">left out</text>"
+          "</svg>")
+  "An SVG of every shape and paint a picture drawn in text follows.")
+
+(defconst lispm-ui-golden--crisp
+  (concat "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\" viewBox=\"0 0 8 8\""
+          " shape-rendering=\"crispEdges\">"
+          "<rect width=\"8\" height=\"8\" fill=\"#000000\"/>"
+          "<rect x=\"1\" y=\"1\" width=\"6\" height=\"6\" fill=\"#FFCC00\"/>"
+          "<rect x=\"2\" y=\"2\" width=\"1\" height=\"4\" fill=\"#FFFFFF\"/>"
+          "<rect x=\"4\" y=\"3\" width=\"3\" height=\"1\" fill=\"#3366FF\"/>"
+          "</svg>")
+  "An SVG of pixels drawn as rectangles, asking for crisp edges, as Mac OS
+9's icons do.")
 
 (defun lispm-ui-golden--intervals (string &optional only)
   "Return STRING with its properties, which `equal' alone ignores, an image
@@ -473,8 +536,66 @@ the glyph function gives them: see `lispm-ui-golden--form'."
         (lambda () (lispm-ui-form "New Character" lispm-ui-golden--fields :submit "Create")))))
     (foreign-form-dressed
      (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
-       (lispm-ui-golden--foreign-form #'lispm-ui-form-glyph #'lispm-ui-form-dress))))
+       (lispm-ui-golden--foreign-form #'lispm-ui-form-glyph #'lispm-ui-form-dress)))
+    ;; lispm-ui-raster.el
+    (raster-shapes
+     (mapcar (lambda (size) (lispm-ui-raster-dom (lispm-ui-golden--xml ,lispm-ui-golden--shapes) size))
+             '(16 8 5)))
+    (raster-crisp
+     (mapcar (lambda (size) (lispm-ui-raster-dom (lispm-ui-golden--xml ,lispm-ui-golden--crisp) size))
+             '(8 4 3)))
+    (raster-icons
+     (mapcar (lambda (icon)
+               (let ((file (expand-file-name (format "icons/%s.svg" icon) lispm-ui-directory)))
+                 (list (lispm-ui-raster file 16) (lispm-ui-raster file 32)
+                       (lispm-ui-raster-color (lispm-ui-raster file 16))
+                       (lispm-ui-raster-pixel-size file))))
+             '(caution stop note)))
+    (text-pictures
+     (mapcar (lambda (arguments)
+               (mapcar #'lispm-ui-golden--intervals
+                       (apply #'lispm-ui-text-picture
+                              (lispm-ui-raster (expand-file-name (format "icons/%s.svg" (car arguments))
+                                                                 lispm-ui-directory)
+                                               16)
+                              (cdr arguments))))
+             '((caution nil "#DDDDDD") (stop t "#DDDDDD") (note nil "#282a36") (caution t nil))))
+    (text-picture-blocks
+     (mapcar #'lispm-ui-golden--intervals
+             (lispm-ui-text-picture
+              [["#ff0000" "#ff0000" "#0000ff" nil "#00ff00" "#00ff00"]
+               ["#ff0000" nil "#0000ff" nil "#00ff00" "#00ff00"]
+               [nil "#ff0000" "#0000ff" "#0000ff" "#00ff00" nil]
+               ["#ff0000" "#ff0000" nil "#0000ff" "#00ff00" "#123456"]
+               ["#ffffff" "#000000" "#ffffff" "#000000" nil nil]]
+              nil "#DDDDDD")))
+    (raster-png
+     (list (base64-encode-string
+            (lispm-ui-raster-png [["#ff0000" nil] [nil "#0000ff"]] 2 6 4 "#00ff00"))
+           (base64-encode-string
+            (lispm-ui-raster-png [["#ff0000" "#336699"] [nil "#0000ff"]] 3 8 7))))
+    (text-compose
+     (list (lispm-ui-text-compose 8 3 '((0 2 "ab") (2 0 "x") (2 6 "long") (1 3 "cd") (1 0 "ef") (5 0 "out")))
+           (lispm-ui-text-size 16) (lispm-ui-text-size 13) lispm-ui-text-cell lispm-ui-raster-samples
+           (lispm-ui-raster-darker "#88aaff")))
+    ;; lispm-ui-icons.el
+    (text-icons
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) t)))
+         (mapcar (lambda (name) (lispm-ui-golden--intervals (lispm-ui-text-icon name)))
+                 (list 'caution 'stop 'note 'emacs "folder-nowhere-32" "document-lisp-nowhere"
+                       "no-such-icon" (expand-file-name "icons/stop.svg" lispm-ui-directory))))))
+    (icon-pictures
+     (mapcar (lambda (arguments)
+               (mapcar #'lispm-ui-golden--intervals (apply #'lispm-ui-icon-picture arguments)))
+             `((caution 16 nil "#DDDDDD") (stop 16 t "#DDDDDD") (note 32 nil "#282a36")
+               (,(expand-file-name "icons/caution.svg" lispm-ui-directory) 16 nil "#DDDDDD")))))
   "The cases compared, (NAME FORM) each, FORM in LispM UI's names.")
+
+(defconst lispm-ui-golden-xml-cases
+  '(dom embed content-image raster-shapes raster-crisp raster-icons text-pictures icon-pictures
+        text-icons)
+  "The cases reading XML, which an Emacs built without libxml2 cannot.")
 
 (defun lispm-ui-golden--rename (form names)
   "Return FORM with each symbol of NAMES, (FROM . TO) each, made TO."
@@ -519,6 +640,9 @@ What they make is written in LispM UI's names, as a face it remaps."
   (require 'lispm-desktop-look)
   (require 'lispm-desktop-i18n)
   (require 'lispm-desktop-form)
+  (require 'lispm-desktop-platinum-raster)
+  (require 'lispm-desktop-platinum-icons)
+  (require 'lispm-ui-base)
   (let ((names (mapcar (pcase-lambda (`(,new . ,old)) (cons new old)) lispm-ui-golden-names))
         (back (mapcar (pcase-lambda (`(,new . ,old)) (cons old new)) lispm-ui-golden-names))
         (print-length nil)

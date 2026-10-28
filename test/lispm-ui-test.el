@@ -28,6 +28,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'hl-line)
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
@@ -1909,6 +1910,174 @@ and those of a mode of its own, while what is typed there goes in."
             (goto-char (1- (widget-field-end area)))
             (should (eq (key-binding (kbd "C-c C-c")) #'lispm-ui-form-submit))))
       (kill-buffer buffer))))
+
+(defun lispm-ui-test--form-mouse (type position &optional end)
+  "Run the mouse command of TYPE at POSITION, dragged to END when given."
+  (let* ((position (if (markerp position) (marker-position position) position))
+         (start (list (selected-window) position '(0 . 0) 0 nil position))
+         (finish (and end (list (selected-window) end '(10 . 0) 0 nil end)))
+         (count (cond ((memq 'triple (event-modifiers type)) 3)
+                      ((memq 'double (event-modifiers type)) 2)))
+         (event (append (list type start) (when (or finish count) (list (or finish count)))))
+         (last-input-event event)
+         (unread-command-events (list (list 'mouse-1 start)))
+         (command (key-binding (vector type) nil nil position)))
+    (should (commandp command))
+    (call-interactively command nil (vector event))
+    (run-hooks 'post-command-hook)))
+
+(ert-deftest lispm-ui-test-form-mouse-selection ()
+  "A repeated click selects a whole one-line value, without its padding;
+a text area still selects words, and a drag still selects text."
+  (let* ((lispm-ui-current-palette nil)
+         (transient-mark-mode nil)
+         (buffer (lispm-ui-form "Pet" '((name :type text :label "Name" :value "Good dog")
+                                         (secret :type password :label "Secret" :value "a b*c")
+                                         (notes :type text-area :label "Notes" :value "Good dog.")))))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (dolist (key '(name secret))
+            (let* ((field (alist-get key lispm-ui-form--widgets))
+                   (start (widget-field-start field))
+                   (end (+ start (length (widget-value field)))))
+              (dolist (type '(double-down-mouse-1 double-mouse-1
+                             triple-down-mouse-1 triple-mouse-1))
+                (deactivate-mark)
+                (lispm-ui-test--form-mouse type (1+ start))
+                (should (region-active-p))
+                (should (= (region-beginning) start))
+                (should (= (region-end) end))
+                (should (= (point) end))
+                (should (get-text-property end 'lispm-ui-form-padding)))))
+          (let ((start (widget-field-start (alist-get 'notes lispm-ui-form--widgets))))
+            (lispm-ui-test--form-mouse 'double-mouse-1 (1+ start))
+            (should (= (region-beginning) start))
+            (should (= (region-end) (+ start 4))))
+          (let ((start (widget-field-start (alist-get 'name lispm-ui-form--widgets))))
+            (lispm-ui-test--form-mouse 'mouse-1 (1+ start))
+            (should (= (point) (1+ start)))
+            (lispm-ui-test--form-mouse 'drag-mouse-1 (1+ start) (+ start 6))
+            (should (= (region-beginning) (1+ start)))
+            (should (= (region-end) (+ start 6)))))
+      (kill-buffer buffer))))
+
+(ert-deftest lispm-ui-test-form-mouse-keeps-point ()
+  "A click on a control that draws the form again leaves point in the
+field it was in, where it was."
+  (let* ((lispm-ui-current-palette nil)
+         (buffer (lispm-ui-form "Pet" '((name :type text :label "Name" :value "Rex")
+                                         (check :type check :label "Check")))))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (let ((here (+ 2 (widget-field-start (alist-get 'name lispm-ui-form--widgets))))
+                (box (alist-get 'check lispm-ui-form--widgets)))
+            (goto-char here)
+            (lispm-ui-test--form-mouse 'down-mouse-1 (widget-get box :from))
+            (should (lispm-ui-form-value 'check))
+            (should (= (point) here))
+            (should (eq (lispm-ui-form--key-at (point)) 'name))))
+      (kill-buffer buffer))))
+
+(ert-deftest lispm-ui-test-form-mouse-empty ()
+  "Clicks and drags on titles, labels, help and empty space leave point
+and the region where they were."
+  (let* ((lispm-ui-current-palette nil)
+         (buffer (lispm-ui-form "Pet" '((name :type text :label "Name" :value "Rex"
+                                               :help "Anything.")))))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (let ((here (point))
+                (positions (cons (point-min)
+                                 (mapcar (lambda (text)
+                                           (save-excursion
+                                             (goto-char (point-min))
+                                             (search-forward text)
+                                             (1- (point))))
+                                         '("Pet" "Name:" "Anything.")))))
+            (dolist (position positions)
+              (dolist (type '(down-mouse-1 mouse-1 drag-mouse-1
+                             double-down-mouse-1 double-mouse-1
+                             triple-down-mouse-1 triple-mouse-1))
+                (push-mark (1+ here) t t)
+                (lispm-ui-test--form-mouse type position
+                                          (and (eq type 'drag-mouse-1) here))
+                (should (= (point) here))
+                (should (= (mark) (1+ here)))
+                (should mark-active)))))
+      (kill-buffer buffer))))
+
+(ert-deftest lispm-ui-test-form-mouse-cursor ()
+  "Buttons work with the mouse, with a cursor only in a dressed form's
+text fields; a form without a palette or on a terminal keeps its cursor."
+  (dolist (style '(dressed plain terminal))
+    (let ((lispm-ui-current-palette
+           (unless (eq style 'plain)
+             (apply #'lispm-ui-derive-palette lispm-ui-test--classic)))
+          (widget-button-click-moves-point t)
+          (lispm-ui-form-choose-function (lambda (&rest _) '(big)))
+          (pressed nil))
+      (cl-letf (((symbol-function 'lispm-ui-tty-p)
+                 (lambda (&optional _) (eq style 'terminal)))
+                ((symbol-function 'widget-image-find)
+                 (lambda (image) (and (eq (car-safe image) 'image) image))))
+        (let ((buffer (lispm-ui-form
+                       "Pet" `((name :type text :label "Name" :value "Rex")
+                               (secret :type password :label "Secret" :value "abc")
+                               (notes :type text-area :label "Notes" :value "Sits.")
+                               (actions :type buttons :buttons (("Test" . ,(lambda () (setq pressed t)))))
+                               (check :type check :label "Check")
+                               (kind :type radio :label "Kind" :value dog
+                                     :choices ((cat . "Cat") (dog . "Dog")))
+                               (size :type choice :label "Size" :choices ((small . "Small") (big . "Big")))))))
+          (unwind-protect
+              (save-window-excursion
+                (switch-to-buffer buffer)
+                (dolist (key '(actions check kind size))
+                  (let* ((button (seq-find (lambda (widget)
+                                            (eq (widget-get widget :lispm-form-key) key))
+                                          (lispm-ui-test--form-buttons)))
+                         (position (overlay-start (widget-get button :button-overlay))))
+                    (lispm-ui-test--form-mouse 'down-mouse-1 position)
+                    (should (widget-at (point)))
+                    (if (eq style 'dressed)
+                        (should-not cursor-type)
+                      (should cursor-type))))
+                (should pressed)
+                (should (lispm-ui-form-value 'check))
+                (should (eq (lispm-ui-form-value 'kind) 'cat))
+                (should (eq (lispm-ui-form-value 'size) 'big))
+                (dolist (key '(name secret notes))
+                  (lispm-ui-test--form-mouse
+                   'mouse-1 (widget-field-start (alist-get key lispm-ui-form--widgets)))
+                  (should cursor-type)
+                  (should (equal cursor-type (default-value 'cursor-type)))))
+            (kill-buffer buffer)))))))
+
+(ert-deftest lispm-ui-test-form-no-line-highlight ()
+  "A form opts out of global line highlighting; dressing a foreign form
+also turns off its local line highlighting."
+  (let* ((global-hl-line-mode t)
+         (buffer (lispm-ui-form "Pet" '((name :type text :label "Name")))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should (local-variable-p 'global-hl-line-mode))
+          (should-not global-hl-line-mode)
+          (global-hl-line-highlight)
+          (should-not global-hl-line-overlay))
+      (kill-buffer buffer)))
+  (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic)))
+    (with-temp-buffer
+      (insert "Settings\n")
+      (hl-line-mode 1)
+      (setq-local global-hl-line-mode t)
+      (lispm-ui-form-dress)
+      (should (local-variable-p 'global-hl-line-mode))
+      (should-not global-hl-line-mode)
+      (should-not hl-line-mode)
+      (should-not hl-line-overlay))))
 
 (defvar-local lispm-ui-test--settings-note nil
   "What the settings of `lispm-ui-test-form-instant' say, set before they are drawn.")

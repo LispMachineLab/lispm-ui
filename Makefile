@@ -27,10 +27,11 @@ i18n:
 
 # What LispM Desktop drew, which LispM UI's tests compare its drawing with,
 # from its lisp/ as LISPM_DESKTOP names it, at a commit from before LispM UI
-# drew for it: see test/lispm-ui-golden.el.
+# drew for it, with the lisp/ of LispM's agent, which it requires, as
+# LISPM_AGENT names it: see test/lispm-ui-golden.el.
 golden:
-	@test -n "$(LISPM_DESKTOP)" || { echo "Say where LispM Desktop's lisp/ is: make golden LISPM_DESKTOP=..."; exit 2; }
-	$(EMACS) -Q --batch -L $(LISPM_KIT) -L . -L $(LISPM_DESKTOP) -l test/lispm-ui-golden.el -f lispm-ui-golden-write
+	@test -n "$(LISPM_DESKTOP)" -a -n "$(LISPM_AGENT)" || { echo "Say where LispM Desktop's lisp/ and LispM's are: make golden LISPM_DESKTOP=... LISPM_AGENT=..."; exit 2; }
+	$(EMACS) -Q --batch -L $(LISPM_KIT) -L . -L $(LISPM_DESKTOP) -L $(LISPM_AGENT) -l test/lispm-ui-golden.el -f lispm-ui-golden-write
 
 # Every control drawn, in each of its states, as SVG in gallery/ (or where
 # GALLERY says), with gallery/index.html showing them: to look at.

@@ -74,8 +74,26 @@
 ;; Positions are pixels, measured in the buffer's own faces, so that
 ;; whatever remaps them, as to a proportional face, gets them right.
 ;;
-;; A form knows nothing of where it is shown.  Whatever shows it may
-;; dress it, as a desktop does in its look:
+;; A form knows nothing of where it is shown.  Once LispM UI has a
+;; palette, which whatever shows it derives (lispm-ui-palette.el), a
+;; form is dressed in its look:
+;;
+;;   - its push buttons, check boxes, radio buttons and pop-up menus are
+;;     LispM UI's controls (lispm-ui-controls.el), and a picture sits in
+;;     an image well;
+;;   - its groups are framed in group boxes;
+;;   - it is shown in the palette's colours: on the chrome's ground, its
+;;     text fields framed in the content's colour, a text area a panel
+;;     of it framed in grey, its faces remapped before it is drawn, to
+;;     be measured in them;
+;;   - the control or the text field the keyboard is on is ringed in the
+;;     focus colour, as Mac OS 9 ringed it;
+;;   - it is drawn again when the palette or the language changes.
+;;
+;; Without a palette it is drawn as text, as before one is derived; on a
+;; text terminal its controls are text, its group boxes drawn in lines.
+;;
+;; Whatever shows a form may dress it otherwise:
 ;; `lispm-ui-form-glyph-function' gives the pictures of its buttons,
 ;; check boxes, radio buttons, pop-up menus and pictures,
 ;; `lispm-ui-form-group-function' the edges of its group boxes,
@@ -90,17 +108,26 @@
 ;; Each control's widget says what it is, as the glyph function was
 ;; asked, in its :lispm-form-control: `check' or `radio' (its state is
 ;; its value), or (KIND STATE LABEL) for a button or a pop-up menu, so
-;; that it can be drawn otherwise, as focused.  Without them, a form is
-;; drawn as text, which a text terminal shows too.
+;; that it can be drawn otherwise, as focused.  A form an application
+;; draws with Emacs's widgets itself is dressed as LispM UI's are when
+;; it calls `lispm-ui-form-dress' once drawn, its controls saying what
+;; they are in a property of `lispm-ui-form-control-properties'.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
+(require 'map)
 (require 'image)
+(require 'svg)
+(require 'face-remap)
 (require 'wid-edit)
+(require 'lispm-ui-base)
 (require 'lispm-ui-i18n)
+(require 'lispm-ui-palette)
+(require 'lispm-ui-draw)
+(require 'lispm-ui-controls)
 
 ;; Only in an Emacs that draws images.
 (declare-function image-size "image.c" (spec &optional pixels frame))
@@ -109,7 +136,7 @@
   "The types a form's fields may be, see `lispm-ui-form'.
 A program written for a later LispM UI may ask whether one it uses is here.")
 
-(defvar lispm-ui-form-glyph-function nil
+(defvar lispm-ui-form-glyph-function #'lispm-ui-form-glyph
   "Function giving the picture of a control of a form, or nil for text.
 It is called with KIND, STATE and LABEL:
   KIND `check' or `radio', STATE `on' or `off', LABEL nil;
@@ -117,9 +144,10 @@ It is called with KIND, STATE and LABEL:
        presses, LABEL its label;
   KIND `popup', a pop-up menu, STATE nil, LABEL what it shows;
   KIND `picture', STATE nil, LABEL the picture's file, or nil for none.
-It returns an image, or nil for the control drawn as text.")
+It returns an image, or nil for the control drawn as text.  By default
+it is LispM UI's control, once LispM UI has a palette.")
 
-(defvar lispm-ui-form-group-function nil
+(defvar lispm-ui-form-group-function #'lispm-ui-form-group
   "Function giving the edges of a form's group boxes, or nil for none.
 A group is the fields after a heading, up to the next.  It is called
 with the PART wanted:
@@ -127,7 +155,8 @@ with the PART wanted:
   `bottom', with WIDTH: the bottom edge;
   `side': a side, as tall as the line it is on.
 It returns a string to insert, as one displaying an image, or nil: then
-the heading is its title in bold, and the group has no frame.")
+the heading is its title in bold, and the group has no frame.  By
+default it is LispM UI's group box, once LispM UI has a palette.")
 
 (defvar lispm-ui-form-choose-function #'lispm-ui-form-choose
   "Function showing the choices of a pop-up menu of a form; it returns one.
@@ -848,6 +877,214 @@ minibuffer.  Return it, or nil when none was chosen."
     (unless (and (file-regular-p file) (lispm-ui-form--picture-p file))
       (user-error "%s" (lispm-ui-tr "Not a picture: %s" (abbreviate-file-name file))))
     (expand-file-name file)))
+
+;;;; Dressing
+
+(defvar-local lispm-ui-form--focus nil
+  "What of the form in this buffer is drawn focused: (START END PLAIN
+FOCUSED) for a control, the text from START to END showing its image
+FOCUSED in place of PLAIN; (field . OVERLAY) for a text field; or nil.")
+
+(defvar-local lispm-ui-form--remaps nil
+  "The face remappings dressing the form in this buffer, to undo.")
+
+(defface lispm-ui-form-text-area '((t :extend t))
+  "Face of a text area of several lines of a form not LispM UI's: a panel
+of the content's colour."
+  :group 'lispm-ui)
+
+(defconst lispm-ui-form-well-size 64
+  "Width and height in pixels of the picture in a form's image well.")
+
+(defvar lispm-ui-form-control-properties '(:lispm-form-control)
+  "The properties of a widget saying what control of a form it is, as
+`lispm-ui-form-glyph-function' gives them: LispM UI's forms', and those
+of applications drawing forms of their own the same way, which add
+theirs.")
+
+(defun lispm-ui-form--image (kind state label &optional focused)
+  "Return the image of a form's control of KIND in STATE reading LABEL, ringed
+when FOCUSED; nil without a palette, or on a text terminal, where the
+form draws it as text."
+  (when (and lispm-ui-current-palette (not (lispm-ui-tty-p)))
+    (if (eq kind 'picture)
+        (lispm-ui-form--well label)
+      (lispm-ui-image-of
+       (pcase kind
+         ('check (lispm-ui-check-box (eq state 'on) nil focused 2))
+         ('radio (lispm-ui-radio (eq state 'on) nil focused))
+         ('button (lispm-ui-push-button label :default (eq state 'default) :focused focused))
+         ('popup (lispm-ui-popup-button label :focused focused)))))))
+
+(defun lispm-ui-form--well (file)
+  "Return an image well holding the picture in FILE, or empty for nil: the
+picture framed in a well sunk into the window, as Mac OS 9 drew one."
+  (lispm-ui-image
+   (list 'form-well file)
+   (lambda ()
+     (let* ((size lispm-ui-form-well-size)
+            (palette lispm-ui-current-palette)
+            (grey (lambda (level) (lispm-ui-grey palette level)))
+            (svg (svg-create (+ size 4) (+ size 4))))
+       ;; Shaded along its top and left, lit along its bottom and right.
+       (lispm-ui-svg-fill svg 0 0 (+ size 4) (+ size 4) (funcall grey #xFF))
+       (lispm-ui-svg-fill svg 0 0 (+ size 3) (+ size 3) (funcall grey #x88))
+       (lispm-ui-svg-fill svg 1 1 (+ size 2) (+ size 2) (plist-get palette :outline))
+       (lispm-ui-svg-fill svg 2 2 size size (plist-get palette :content))
+       (when (and file (file-readable-p file))
+         (lispm-ui-svg-emacs-image svg (create-image file) 2 2 size size))
+       svg))))
+
+(defun lispm-ui-form-glyph (kind state label)
+  "Return the image of a form's control, LispM UI's, or nil for text.
+KIND, STATE and LABEL are as `lispm-ui-form-glyph-function' gives them.
+Without a palette, or on a text terminal, it is nil.  Emacs's widgets
+centre a check box's or a radio button's image on its line themselves,
+and an image saying so twice is no image."
+  (when-let* ((image (lispm-ui-form--image kind state label)))
+    (if (memq kind '(check radio))
+        (cons 'image (map-delete (copy-sequence (cdr image)) :ascent))
+      image)))
+
+(defun lispm-ui-form-group (part &rest args)
+  "Return PART of a form's group box, LispM UI's, a string; nil without a
+palette.  PART and ARGS are as `lispm-ui-form-group-function' gives
+them: the top edge, titled, and the bottom one are LispM UI's group
+box's; a side is its grey line and its lit one, as tall as the line they
+stand on.  On a text terminal they are drawn in lines of text."
+  (when lispm-ui-current-palette
+    (pcase part
+      ('top (lispm-ui-group-edge (car args) (cadr args)))
+      ('bottom (lispm-ui-group-edge (car args) nil t))
+      ('side (if (lispm-ui-tty-p)
+                 (lispm-ui-group-side 1)
+               (let ((palette lispm-ui-current-palette))
+                 (concat (propertize " " 'display '(space :width (1))
+                                     'face `(:background ,(lispm-ui-grey palette #x88)))
+                         (propertize " " 'display '(space :width (1))
+                                     'face `(:background ,(lispm-ui-grey palette #xFF))))))))))
+
+(defun lispm-ui-form--control-at (position)
+  "The control of the form at POSITION drawn as an image, as (START END
+PLAIN FOCUSED): the text it is drawn over, and its images; or nil."
+  (when-let* ((widget (widget-at position))
+              (control (seq-some (lambda (property) (widget-get widget property))
+                                 lispm-ui-form-control-properties))
+              (overlay (widget-get widget :button-overlay))
+              ((overlayp overlay))
+              (start (overlay-start overlay))
+              ((consp (get-text-property start 'display))))
+    (pcase-let ((`(,kind ,state ,label)
+                 (if (consp control)
+                     control
+                   (list control (if (widget-value widget) 'on 'off) nil))))
+      (when-let* ((plain (lispm-ui-form--image kind state label))
+                  (focused (lispm-ui-form--image kind state label t)))
+        (list start (overlay-end overlay) plain focused)))))
+
+(defun lispm-ui-form--show (start end image)
+  "Show IMAGE over the text from START to END, quietly."
+  (with-silent-modifications
+    (let ((inhibit-read-only t))
+      (put-text-property start end 'display image))))
+
+(defun lispm-ui-form--field-overlay (position)
+  "The overlay of the form's text field of one line at POSITION, or nil.
+A text area has no frame to ring."
+  (when-let* ((field (widget-field-at position))
+              ((not (eq (widget-type field) 'text))))
+    (let ((overlay (widget-get field :field-overlay)))
+      (and (overlayp overlay) overlay))))
+
+(defun lispm-ui-form--follow ()
+  "Draw focused what of the form in this buffer point is on, and plain what
+was before: a control ringed, a text field framed in the focus colour.
+Run from the buffer's `post-command-hook', and once the form is drawn."
+  (let* ((control (lispm-ui-form--control-at (point)))
+         (field (and (not control) (lispm-ui-form--field-overlay (point))))
+         (now (cond (control control)
+                    (field (cons 'field field)))))
+    (unless (equal now lispm-ui-form--focus)
+      (pcase lispm-ui-form--focus
+        (`(field . ,overlay)
+         (when (overlay-buffer overlay)
+           (overlay-put overlay 'face 'widget-field)))
+        (`(,start ,end ,plain ,_)
+         (when (<= end (point-max))
+           (lispm-ui-form--show start end plain))))
+      (pcase now
+        (`(field . ,overlay)
+         (overlay-put overlay 'face 'lispm-ui-field-focused))
+        (`(,start ,end ,_ ,focused) (lispm-ui-form--show start end focused)))
+      (setq lispm-ui-form--focus now))))
+
+(defun lispm-ui-form--faces ()
+  "Remap the faces of the form in this buffer to the palette: the list face
+on the chrome's ground, the fields framed in the content's colour, a text
+area in it, framed in grey, the help small and muted.  LispM UI's forms
+take them before they are drawn, to be measured in them.  Without a
+palette, or on a text terminal, the faces are left as they are."
+  (mapc #'face-remap-remove-relative lispm-ui-form--remaps)
+  (setq lispm-ui-form--remaps
+        (when (and lispm-ui-current-palette (not (lispm-ui-tty-p)))
+          (let ((content (lispm-ui-color :content)))
+            (list (face-remap-add-relative 'default 'lispm-ui-list
+                                           `(:background ,(lispm-ui-color :chrome)))
+                  (face-remap-add-relative 'widget-field 'lispm-ui-field)
+                  (face-remap-add-relative 'lispm-ui-form-area `(:background ,content :foreground
+                                                                ,(lispm-ui-color :text)))
+                  (face-remap-add-relative 'lispm-ui-form-area-edge
+                                           `(:background ,(lispm-ui-grey lispm-ui-current-palette #x88)))
+                  (face-remap-add-relative 'lispm-ui-form-text-area `(:background ,content))
+                  (face-remap-add-relative 'lispm-ui-form-help 'lispm-ui-small
+                                           `(:foreground ,(lispm-ui-color :muted)))
+                  (face-remap-add-relative 'lispm-ui-form-title 'lispm-ui-title))))))
+
+(defun lispm-ui-form--text-areas ()
+  "Draw the text areas of the form in this buffer as panels of the
+content's colour, their lines after the first lined up with it: a form
+not LispM UI's, which draws its own."
+  (dolist (field widget-field-list)
+    (when-let* (((eq (car field) 'text))
+                (overlay (widget-get field :field-overlay))
+                ((overlayp overlay)))
+      (overlay-put overlay 'face 'lispm-ui-form-text-area)
+      (overlay-put overlay 'line-prefix "  ")
+      ;; Its last newline is in an overlay of its own.
+      (when-let* ((end (widget-get field :field-end-overlay))
+                  ((overlayp end)))
+        (overlay-put end 'face 'lispm-ui-form-text-area)
+        (overlay-put end 'line-prefix "  ")))))
+
+(defun lispm-ui-form-dress ()
+  "Dress the form in this buffer, just drawn, once LispM UI has a palette:
+what point is on drawn focused, as the keyboard moves.  A form not LispM
+UI's, drawn with Emacs's widgets as an application's settings are, is
+put in the palette's colours too, its text areas panels.  Run
+from `lispm-ui-form-drawn-hook', and from an application's like it."
+  (when lispm-ui-current-palette
+    (unless (derived-mode-p 'lispm-ui-form-mode)
+      (lispm-ui-form--faces)
+      (lispm-ui-form--text-areas))
+    (add-hook 'post-command-hook #'lispm-ui-form--follow nil t)
+    ;; What was focused was drawn over.
+    (setq lispm-ui-form--focus nil)
+    (lispm-ui-form--follow)))
+
+(defun lispm-ui-form-redraw-all (&rest _)
+  "Draw every form again, in the palette and the language now in use."
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (derived-mode-p 'lispm-ui-form-mode)
+        (lispm-ui-form--faces)
+        (lispm-ui-form-redraw)))))
+
+(add-hook 'lispm-ui-form-mode-hook #'lispm-ui-form--faces)
+(add-hook 'lispm-ui-form-drawn-hook #'lispm-ui-form-dress)
+;; Late, after what shows LispM UI has set its faces' fonts in the new
+;; palette: the forms are measured in them.
+(add-hook 'lispm-ui-palette-changed-hook #'lispm-ui-form-redraw-all 90)
+(add-hook 'lispm-ui-language-changed-hook #'lispm-ui-form-redraw-all 90)
 
 ;;;; Submitting and cancelling
 

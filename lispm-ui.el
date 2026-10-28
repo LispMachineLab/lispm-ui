@@ -44,6 +44,10 @@
 ;;   lispm-ui-draw.el   what it draws with: SVG primitives, text and
 ;;                      pictures drawn as Emacs shows them, and the cache
 ;;                      of drawn images
+;;   lispm-ui-raster.el pictures drawn in text, in block characters, and
+;;                      as PNGs, for text terminals
+;;   lispm-ui-icons.el  icons, found by name: an interface's own, or
+;;                      the alerts', which LispM UI has
 ;;   lispm-ui-controls.el
 ;;                      its controls: push buttons, pop-up menus, bevel
 ;;                      buttons, radio buttons, check boxes and group
@@ -74,6 +78,8 @@
 (require 'lispm-ui-look)
 (require 'lispm-ui-text)
 (require 'lispm-ui-draw)
+(require 'lispm-ui-raster)
+(require 'lispm-ui-icons)
 (require 'lispm-ui-modal)
 (require 'lispm-ui-ask)
 (require 'lispm-ui-controls)

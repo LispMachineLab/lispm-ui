@@ -16,6 +16,8 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-look.el=    | the looks it draws in, each the forms of one system's interface, and families of looks drawn alike                      |
 | =lispm-ui-text.el=    | text laid out in pixels: widths, fitting with an ellipsis, aligning, breaking lines, Chinese and Japanese type          |
 | =lispm-ui-draw.el=    | what it draws with: SVG primitives, text and pictures drawn as Emacs shows them, and the cache of drawn images          |
+| =lispm-ui-raster.el=  | pictures drawn in text, in block characters, and as PNGs, for text terminals                                            |
+| =lispm-ui-icons.el=   | icons found by name: an interface's own, through a hook, and those its alerts show                                      |
 | =lispm-ui-controls.el= | its controls: push buttons and the default one's ring, pop-up menus, bevel buttons, radio buttons, check boxes, group boxes |
 | =lispm-ui-list.el=    | lists' column headings, the column sorted by pushed in, and disclosure triangles                                      |
 | =lispm-ui-scroll.el=  | scroll bars: where the thumb stands for what shows, and the bar drawn                                                  |
@@ -51,6 +53,20 @@ whatever shows LispM UI may name colours outright with a function of ~lispm-ui-p
 and colour its own faces on ~lispm-ui-palette-changed-hook~.  Each drawing is a generic function
 whose default method draws the classic look; a look, named by ~lispm-ui-look~, draws its own forms
 in methods specialized on it, or on its family of looks (see =lispm-ui-look.el=).
+
+* Icons
+
+~lispm-ui-icon~ shows an icon by its name, as an image, or on a text terminal as a character in
+the icon's colour; ~lispm-ui-icon-picture~ draws it there in block characters instead.  LispM UI
+has the icons its alerts show, =caution=, =stop= and =note=; an interface with icons of its own
+finds them with a function of ~lispm-ui-icon-functions~:
+
+#+begin_src emacs-lisp
+(add-hook 'lispm-ui-icon-functions
+          (lambda (name)
+            (let ((file (expand-file-name (format "%s.svg" name) my-icons)))
+              (and (file-readable-p file) file))))
+#+end_src
 
 * Forms
 

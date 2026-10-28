@@ -382,6 +382,57 @@ in other units, is embedded as it is."
                      "0 0 4 4"))
       (should-not (embedded "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10mm\" height=\"10mm\"/>" 64 64)))))
 
+(defmacro lispm-ui-test--keeping-faces (faces &rest body)
+  "Run BODY, then give FACES back the attributes they had before it."
+  (declare (indent 1))
+  `(let ((kept (mapcar (lambda (face) (cons face (copy-sequence (face-all-attributes face))))
+                       ,faces)))
+     (unwind-protect (progn ,@body)
+       (pcase-dolist (`(,face . ,attributes) kept)
+         (apply #'set-face-attribute face nil
+                (apply #'append (mapcar (pcase-lambda (`(,key . ,value)) (list key value))
+                                        attributes)))))))
+
+(defun lispm-ui-test--text-fills (svg)
+  "Return the text SVG holds, each piece with the colour it is drawn in."
+  (mapcar (lambda (text) (cons (dom-text text) (dom-attr text 'fill)))
+          (dom-by-tag svg 'text)))
+
+(ert-deftest lispm-ui-test-svg-content-ink ()
+  "Text is drawn in the ink it is given, not in the colour a palette gives
+the face it is drawn in, nor in that face put on the text to measure it,
+as a selected row's label is: a colour of the text's own holds, and the
+face's is taken only without an ink."
+  (lispm-ui-test--keeping-faces '(lispm-ui-list)
+    (set-face-attribute 'lispm-ui-list nil :foreground "#123456")
+    (cl-flet ((fills (content color)
+                (let ((svg (svg-create 200 20)))
+                  (lispm-ui-svg-content svg content 0 0 20 color 'lispm-ui-list)
+                  (lispm-ui-test--text-fills svg))))
+      (should (equal (fills "Ada" "#FFFFFF") '(("Ada" . "#FFFFFF"))))
+      (should (equal (fills (propertize "Ada" 'face 'lispm-ui-list) "#FFFFFF") '(("Ada" . "#FFFFFF"))))
+      (should (equal (fills (concat "Ada " (propertize "red" 'face '(:foreground "#FF0000"))) "#FFFFFF")
+                     '(("Ada " . "#FFFFFF") ("red" . "#FF0000"))))
+      (should (equal (fills "Ada" nil) '(("Ada" . "#123456")))))))
+
+(ert-deftest lispm-ui-test-svg-content-bold-without-family ()
+  "Bold text in faces naming no family, as in a plain Emacs, is weighed in
+the default face's family: Emacs logs no invalid face attribute for it,
+as it did, once a palette, for a family of nil."
+  (let ((lispm-ui--svg-fonts (make-hash-table :test #'equal))
+        (messages-buffer-name " *lispm-ui-test-messages*"))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-graphic-p) #'always))
+          (lispm-ui-svg-content (svg-create 100 20) (propertize "Save" 'face 'bold)
+                                0 0 20 "#000000" 'lispm-ui-list)
+          (should-not (eq (gethash (list lispm-ui-palette-generation 'synthetic 'default)
+                                   lispm-ui--svg-fonts 'none)
+                          'none))
+          (should-not (string-search "Invalid face attribute"
+                                     (with-current-buffer (messages-buffer) (buffer-string)))))
+      (when (get-buffer messages-buffer-name)
+        (kill-buffer messages-buffer-name)))))
+
 ;;;; lispm-ui-raster
 
 (defun lispm-ui-test--svg (string)
@@ -833,14 +884,21 @@ title; margins stand the boxes nearest the ends that far in."
 (ert-deftest lispm-ui-test-title-part ()
   "A stretch of title bar is as tall as a title bar; active, it is lit
 along its top over the content's black line, and its label is drawn in
-the titles' face; inactive, its label is greyed."
+the titles' face; inactive, its label is in the muted colour of the
+inactive title's face, which a dark theme's bar shows as it shows no
+Mac OS 9 grey."
   (let* ((palette (lispm-ui-derive-palette "#DDDDDD" "#000000" "#777777" "#6363CE"))
          (active (lispm-ui-draw-title-part palette 200 :active t :ridges '((10 . 60)) :label "Choose"
                                            :label-x 80 :lead t :trail t))
-         (inactive (lispm-ui-draw-title-part palette 200 :label "Choose" :label-x 80)))
+         (inactive (lispm-ui-draw-title-part palette 200 :label "Choose" :label-x 80))
+         (dark (apply #'lispm-ui-derive-palette lispm-ui-golden--dark)))
     (should (equal (dom-attr active 'height) lispm-ui-title-bar-height))
     (should (equal (dom-attr (car (dom-by-tag active 'text)) 'fill) (plist-get palette :text)))
-    (should (equal (dom-attr (car (dom-by-tag inactive 'text)) 'fill) (lispm-ui-grey palette #x77)))
+    (should (equal (dom-attr (car (dom-by-tag inactive 'text)) 'fill) (plist-get palette :muted)))
+    (should (equal (dom-attr (car (dom-by-tag (lispm-ui-draw-title-part dark 200 :label "Choose" :label-x 80)
+                                              'text))
+                             'fill)
+                   (plist-get dark :muted)))
     (should (< (length (dom-by-tag inactive 'rect)) (length (dom-by-tag active 'rect))))))
 
 ;;;; lispm-ui-modal
@@ -1394,6 +1452,26 @@ Apple menu did: the labels move over to make room."
     (should (= (lispm-ui-menu--width items)
                (+ 20 (lispm-ui-menu--width (mapcar (lambda (item) (plist-put (copy-sequence item) :icon nil))
                                                    items)))))))
+
+(ert-deftest lispm-ui-test-menu-highlighted-ink ()
+  "The item under the mouse is drawn, its check mark and key too, in the
+highlight's text colour, though the palette colours the items' face in
+its text colour, as the other items are drawn."
+  (lispm-ui-test--keeping-faces '(lispm-ui-menu-item lispm-ui-menu-item-highlight
+                                  lispm-ui-menu-item-disabled)
+    (let* ((palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+           (lispm-ui-current-palette palette)
+           (lit (plist-get palette :highlight-text))
+           (text (plist-get palette :text)))
+      (lispm-ui-menu--apply-faces)
+      (should-not (equal lit text))
+      ;; The check mark, the label and the key of the first, the label of
+      ;; the second.
+      (should (equal (mapcar #'cdr (lispm-ui-test--text-fills
+                                    (lispm-ui-draw-menu palette '((:label "Open" :action ignore :checked t :key "C-o")
+                                                                  (:label "Close" :action ignore))
+                                                        120 0)))
+                     (list lit lit lit text))))))
 
 (ert-deftest lispm-ui-test-submenu-turns-at-the-edge ()
   "A submenu opens beside its item, or on the menu's left when the right

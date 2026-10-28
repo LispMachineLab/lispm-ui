@@ -28,6 +28,7 @@
   ("Choose…" . "選択…")
   ("No picture" . "画像なし")
   ("Remove" . "削除")
+  ("Choose a Picture" . "ピクチャを選択")
   ("Picture: " . "画像：")
   ("Not a picture: %s" . "画像ではありません：%s")
   ("%s: fill this in" . "%s：入力してください")

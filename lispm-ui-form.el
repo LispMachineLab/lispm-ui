@@ -197,13 +197,14 @@ TEXT), the VALUE chosen now, and the EVENT that pressed the menu, if
 any, with point on the menu.  It returns (VALUE), the choice made, or
 nil when none was.")
 
-(defvar lispm-ui-form-choose-file-function nil
+(defvar lispm-ui-form-choose-file-function #'lispm-ui-form-choose-file
   "Function showing files to choose one of for a form's field, or nil.
 It is called with the field's TYPE, `picture', its LABEL, the FILE
 chosen now, or nil, and PREDICATE, a function of a file's name saying
 whether it may be chosen, as whether it is a picture.  It returns the
-file chosen, or nil when none was.  Without one, the file is read in
-the minibuffer.")
+file chosen, or nil when none was.  By default, `lispm-ui-form-choose-file'
+shows them, as `lispm-ui-choose-file' does; without one, the file is
+read in the minibuffer.")
 
 (defvar lispm-ui-form-drawn-hook nil
   "Normal hook run in a form's buffer each time it is drawn.")
@@ -1186,6 +1187,18 @@ form are told, as when it is drawn."
 An Emacs without a display shows none, but keeps them all the same."
   (or (image-supported-file-p file)
       (member (downcase (or (file-name-extension file) "")) '("png" "jpg" "jpeg" "gif" "svg" "webp"))))
+
+(defun lispm-ui-form-choose-file (type label file predicate)
+  "Show the files a form's field of TYPE and LABEL may choose, FILE chosen
+now, those PREDICATE takes, with `lispm-ui-choose-file'; return the file
+chosen, or nil.  A picture's are titled so, the picture selected
+previewed beside them.  This is the default
+`lispm-ui-form-choose-file-function'."
+  (ignore label)
+  (lispm-ui-choose-file :title (if (eq type 'picture)
+                                   (lispm-ui-tr "Choose a Picture")
+                                 (lispm-ui-tr "Choose a File"))
+                        :file file :predicate predicate :preview (eq type 'picture)))
 
 (defun lispm-ui-form--read-picture (old &optional label)
   "Choose the file of a picture for the field LABEL, from OLD's directory:

@@ -28,6 +28,7 @@
   ("Choose…" . "选取…")
   ("No picture" . "没有图片")
   ("Remove" . "移除")
+  ("Choose a Picture" . "选取图片")
   ("Picture: " . "图片：")
   ("Not a picture: %s" . "不是图片：%s")
   ("%s: fill this in" . "%s：请填写")

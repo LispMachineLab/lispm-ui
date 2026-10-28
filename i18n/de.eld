@@ -28,6 +28,7 @@
   ("Choose…" . "Auswählen…")
   ("No picture" . "Kein Bild")
   ("Remove" . "Entfernen")
+  ("Choose a Picture" . "Bild auswählen")
   ("Picture: " . "Bild: ")
   ("Not a picture: %s" . "Kein Bild: %s")
   ("%s: fill this in" . "%s: bitte ausfüllen")

@@ -2508,6 +2508,14 @@ the next with savehist."
                (lambda (&rest _) (setq asked t) (expand-file-name "missing" temporary-file-directory))))
       (should-not (lispm-ui-choose-file :directory temporary-file-directory))
       (should asked)))
+  ;; A form's picture is chosen so too, the dialog titled for a picture
+  ;; and previewing it.
+  (let* ((asked nil)
+         (lispm-ui-choose-file-function (lambda (&rest args) (setq asked args) "/tmp/ada.png")))
+    (should (eq (default-value 'lispm-ui-form-choose-file-function) #'lispm-ui-form-choose-file))
+    (should (equal (lispm-ui-form-choose-file 'picture "Picture" "/tmp/bob.png" #'ignore) "/tmp/ada.png"))
+    (should (equal asked '(:title "Choose a Picture" :file "/tmp/bob.png" :directory "/tmp/"
+                                  :predicate ignore :preview t))))
   (require 'savehist)
   (should (memq 'lispm-ui-choose-recent savehist-additional-variables)))
 

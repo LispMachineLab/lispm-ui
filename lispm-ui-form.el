@@ -86,8 +86,11 @@
 ;; `lispm-ui-form' draws it in a buffer of its own with Emacs's widgets
 ;; (wid-edit.el), and returns the buffer: TAB and S-TAB go from field to
 ;; field, Return to the next field (a new line in a text area), C-c C-c
-;; submits it, C-c C-k cancels it, the mouse presses its buttons.  Once
-;; its values are valid, :on-submit is called with them, an alist, and
+;; submits it, C-c C-k cancels it.  The mouse presses its buttons and
+;; puts point in its fields, a double click selecting a field's whole
+;; value, as a dialog's mouse does: a click on anything else does
+;; nothing, and only a text field shows a cursor.  Once its values are
+;; valid, :on-submit is called with them, an alist, and
 ;; the form goes, unless it signals an error, which is shown.
 ;;
 ;; A form made :instant applies each change as it is made, through its
@@ -162,6 +165,9 @@
 
 ;; Only in an Emacs that draws images.
 (declare-function image-size "image.c" (spec &optional pixels frame))
+(declare-function global-hl-line-unhighlight "hl-line" ())
+(defvar global-hl-line-mode)
+(defvar hl-line-mode)
 
 (defconst lispm-ui-form-types
   '(text password text-area picture choice radio check buttons rows status heading)
@@ -296,7 +302,16 @@ default the current buffer: an alist (KEY . WIDGET)."
   :doc "Keymap of `lispm-ui-form-mode'."
   :parent widget-keymap
   "C-c C-c" #'lispm-ui-form-submit
-  "C-c C-k" #'lispm-ui-form-cancel)
+  "C-c C-k" #'lispm-ui-form-cancel
+  "<down-mouse-1>" #'lispm-ui-form--mouse
+  "<mouse-1>" #'lispm-ui-form--mouse
+  "<drag-mouse-1>" #'lispm-ui-form--mouse
+  "<double-down-mouse-1>" #'lispm-ui-form--mouse
+  "<double-mouse-1>" #'lispm-ui-form--mouse
+  "<double-drag-mouse-1>" #'lispm-ui-form--mouse
+  "<triple-down-mouse-1>" #'lispm-ui-form--mouse
+  "<triple-mouse-1>" #'lispm-ui-form--mouse
+  "<triple-drag-mouse-1>" #'lispm-ui-form--mouse)
 
 (define-derived-mode lispm-ui-form-mode nil "Form"
   "A form: fields to fill in, written as data (see `lispm-ui-form').
@@ -306,6 +321,8 @@ TAB and S-TAB go from field to field, \\[lispm-ui-form-submit] submits it,
 \\{lispm-ui-form-mode-map}"
   (setq-local truncate-lines nil)
   (setq-local word-wrap t)
+  ;; A dialog does not highlight the line point is on.
+  (setq-local global-hl-line-mode nil)
   ;; A new line of a text area starts where its panel does, not indented
   ;; under the label beside its first.
   (electric-indent-local-mode -1)
@@ -609,11 +626,25 @@ Where pictures cannot be shown, the control is drawn as text anyway."
         (when-let* ((parent (widget-get widget :parent)))
           (widget-get parent :lispm-form-key)))))
 
+(defun lispm-ui-form--place ()
+  "Where point is in the form in this buffer: (KEY . OFFSET), the key of
+the field it is in and how far into it, or nil."
+  (when-let* ((key (lispm-ui-form--key-at (point)))
+              (widget (alist-get key lispm-ui-form--widgets)))
+    (cons key (max 0 (- (point) (or (widget-field-start widget) (widget-get widget :from) (point)))))))
+
+(defun lispm-ui-form--go-to (place)
+  "Put point at PLACE, as `lispm-ui-form--place' said it was, in the field
+as it is drawn now."
+  (when-let* ((widget (and place (alist-get (car place) lispm-ui-form--widgets))))
+    (goto-char (min (+ (or (widget-field-start widget) (widget-get widget :from)) (cdr place))
+                    (or (widget-field-end widget) (widget-get widget :to))))
+    ;; Its text field, if it is one, shows point again.
+    (lispm-ui-form--keep-point)))
+
 (defun lispm-ui-form--draw ()
   "Draw the form in this buffer, point staying in the field it was in."
-  (let* ((key (lispm-ui-form--key-at (point)))
-         (offset (when-let* ((widget (and key (alist-get key lispm-ui-form--widgets))))
-                   (max 0 (- (point) (or (widget-field-start widget) (widget-get widget :from) (point))))))
+  (let* ((place (lispm-ui-form--place))
          (inhibit-read-only t)
          (group nil))
     ;; The fields go first: erasing them would change them otherwise.
@@ -663,11 +694,7 @@ Where pictures cannot be shown, the control is drawn as text anyway."
     (lispm-ui-form--buttons)
     (widget-setup)
     (lispm-ui-form--shape)
-    (when-let* ((widget (and key (alist-get key lispm-ui-form--widgets))))
-      (goto-char (min (+ (or (widget-field-start widget) (widget-get widget :from)) (or offset 0))
-                      (or (widget-field-end widget) (widget-get widget :to))))
-      ;; Its text field, if it is one, shows point again.
-      (lispm-ui-form--keep-point))
+    (lispm-ui-form--go-to place)
     (run-hooks 'lispm-ui-form-drawn-hook)))
 
 (defun lispm-ui-form--buttons ()
@@ -1091,6 +1118,43 @@ after each command in a form's buffer."
     (when field
       (lispm-ui-form--shape-field field))))
 
+(defun lispm-ui-form--mouse (event)
+  "Do what the mouse EVENT does in a form, as in a dialog: on a field or a
+control, what it does in Emacs, a double or triple click in a field of
+one line selecting its whole value, without its padding; on anything
+else, nothing, point and the region staying where they are."
+  (interactive "e")
+  (let* ((start (event-start event))
+         (window (posn-window start))
+         (position (posn-point start))
+         (modifiers (event-modifiers event)))
+    (when (and (window-live-p window) (integerp position))
+      (let ((widget (with-current-buffer (window-buffer window)
+                      (widget-at position))))
+        (cond
+         ((not widget)
+          (select-window window))
+         ((and (memq (widget-type widget) '(editable-field lispm-ui-form-password))
+               (or (memq 'double modifiers) (memq 'triple modifiers)))
+          (select-window window)
+          (goto-char (widget-field-end widget))
+          (lispm-ui-form--keep-point)
+          (push-mark (widget-field-start widget) t t)
+          (activate-mark)
+          (setq deactivate-mark nil))
+         ((memq 'down modifiers)
+          ;; Emacs's widgets press a button with point saved, which a
+          ;; form drawn again by the press would leave at its start.
+          (let ((place (and (not widget-button-click-moves-point)
+                            (eq window (selected-window))
+                            (get-char-property position 'button)
+                            (lispm-ui-form--place))))
+            (widget-button-click event)
+            (when place
+              (lispm-ui-form--go-to place))))
+         ((memq 'drag modifiers) (mouse-set-region event))
+         (t (mouse-set-point event t)))))))
+
 (defun lispm-ui-form--shape-area (widget)
   "Make the text area WIDGET a panel as wide as the form's fields, framed:
 its lines after the first start where the first does, each runs to the
@@ -1322,7 +1386,13 @@ A text area has no frame to ring."
 (defun lispm-ui-form--follow ()
   "Draw focused what of the form in this buffer point is on, and plain what
 was before: a control ringed, a text field framed in the focus colour.
+Only a text field keeps the cursor when the form is dressed in images.
 Run from the buffer's `post-command-hook', and once the form is drawn."
+  (setq-local cursor-type
+              (if (and lispm-ui-current-palette (not (lispm-ui-tty-p))
+                       (not (widget-field-find (point))))
+                  nil
+                (default-value 'cursor-type)))
   (let* ((control (lispm-ui-form--control-at (point)))
          (field (and (not control) (lispm-ui-form--field-overlay (point))))
          (now (cond (control control)
@@ -1387,6 +1457,11 @@ put in the palette's colours too, its text areas panels.  Run
 from `lispm-ui-form-drawn-hook', and from an application's like it."
   (when lispm-ui-current-palette
     (unless (derived-mode-p 'lispm-ui-form-mode)
+      (setq-local global-hl-line-mode nil)
+      (when (bound-and-true-p hl-line-mode)
+        (hl-line-mode -1))
+      (when (fboundp 'global-hl-line-unhighlight)
+        (global-hl-line-unhighlight))
       (lispm-ui-form--faces)
       (lispm-ui-form--text-areas))
     (add-hook 'post-command-hook #'lispm-ui-form--follow nil t)

@@ -5,7 +5,7 @@
 ;; Author: Ryan.K
 ;; URL: https://github.com/LispMachineLab/lispm-ui
 ;; Version: 0.0.1
-;; Package-Requires: ((emacs "30.1"))
+;; Package-Requires: ((emacs "30.1") (lispm-kit "0.2.0"))
 ;; Keywords: convenience, faces, mouse
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -32,7 +32,8 @@
 ;;   lispm-ui-base.el   where it is, whether a frame is a text terminal,
 ;;                      and lengths drawn in pixels counted in cells there
 ;;   lispm-ui-i18n.el   the language its words are shown in, and their
-;;                      translations, i18n/
+;;                      translations, i18n/, which LispM Kit's engine
+;;                      reads
 ;;   lispm-ui-modal.el  what its modal panels share: reading events
 ;;                      without quitting, what each key does, focus
 ;;                      rings, holding a control pressed

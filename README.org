@@ -54,7 +54,8 @@ Every panel works from a keyboard without arrow or function keys, as the HHKB is
 
 Its words are written in English and shown in English, German, French, Japanese or Chinese,
 Simplified or Traditional: the language ~lispm-ui-language~ names, else that of the program
-showing it, else the computer's.  A program says its language with a function of
+showing it, else the computer's.  [[https://github.com/LispMachineLab/lispm-kit][LispM Kit]] translates them, as it does every LispM
+program's words; LispM UI keeps only its catalogs, =i18n/=.  A program says its language with a function of
 ~lispm-ui-language-functions~, and calls ~lispm-ui-language-changed~ when it speaks another:
 
 #+begin_src emacs-lisp
@@ -64,9 +65,10 @@ showing it, else the computer's.  A program says its language with a function of
 * Installing it
 
 LispM installs it, and its App Store installs it before the applications that need it.
-Elsewhere, from git:
+Elsewhere, from git, after LispM Kit, which it requires:
 
 #+begin_src emacs-lisp
+(package-vc-install "https://github.com/LispMachineLab/lispm-kit")
 (package-vc-install "https://github.com/LispMachineLab/lispm-ui")
 #+end_src
 
@@ -75,7 +77,8 @@ it uses, or ~lispm-ui~ for all of them.
 
 * Testing
 
-=make test compile= runs the tests and byte-compiles the sources, warnings counted as errors.
+=make test compile= runs the tests and byte-compiles the sources, warnings counted as errors,
+with a checkout of LispM Kit beside this one, or where =LISPM_KIT= says.
 =make i18n= lists the messages each catalog lacks, and those it holds that the code no longer
 gives.
 

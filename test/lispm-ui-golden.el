@@ -236,7 +236,41 @@
     (lispm-ui-alert-width . lispm-desktop-popup-alert-width)
     (lispm-ui-draw-alert . lispm-desktop-popup-draw-alert)
     (lispm-ui-svg-alert-contents . lispm-desktop-popup-svg-alert-contents)
-    (lispm-ui-text-alert-width . lispm-desktop-popup-text-alert-width))
+    (lispm-ui-text-alert-width . lispm-desktop-popup-text-alert-width)
+    ;; lispm-ui-menu.el
+    (lispm-ui-choose-default . lispm-desktop-platinum-choose)
+    (lispm-ui-draw-menu . lispm-desktop-popup-draw-menu)
+    (lispm-ui-menu . lispm-desktop-popup-menu)
+    (lispm-ui-menu--enabled-p . lispm-desktop-popup--enabled-p)
+    (lispm-ui-menu--icon-room . lispm-desktop-popup--icon-room)
+    (lispm-ui-menu--index-at . lispm-desktop-popup--index-at)
+    (lispm-ui-menu--item-height . lispm-desktop-popup--item-height)
+    (lispm-ui-menu--item-starting . lispm-desktop-popup--item-starting)
+    (lispm-ui-menu--key . lispm-desktop-popup--key)
+    (lispm-ui-menu--key-margin . lispm-desktop-popup--key-margin)
+    (lispm-ui-menu--label-x . lispm-desktop-popup--label-x)
+    (lispm-ui-menu--rows . lispm-desktop-popup--rows)
+    (lispm-ui-menu--step . lispm-desktop-popup--step)
+    (lispm-ui-menu--submenu-place . lispm-desktop-popup--submenu-place)
+    (lispm-ui-menu--text . lispm-desktop-popup--text-menu)
+    (lispm-ui-menu--width . lispm-desktop-popup--menu-width)
+    (lispm-ui-menu-bar-step . lispm-desktop-popup-menu-bar-step)
+    (lispm-ui-menu-choose . lispm-desktop-popup-choose)
+    (lispm-ui-menu-icon-size . lispm-desktop-popup-icon-size)
+    (lispm-ui-menu-item . lispm-desktop-popup-item)
+    (lispm-ui-menu-item-disabled . lispm-desktop-popup-item-disabled)
+    (lispm-ui-menu-item-height . lispm-desktop-popup-item-height)
+    (lispm-ui-menu-item-highlight . lispm-desktop-popup-item-highlight)
+    (lispm-ui-menu-key-margin . lispm-desktop-popup-key-margin)
+    (lispm-ui-menu-keyboard-p . lispm-desktop-popup-keyboard-p)
+    (lispm-ui-menu-label-x . lispm-desktop-popup-label-x)
+    (lispm-ui-menu-open . lispm-desktop-popup-open-menu)
+    (lispm-ui-menu-parent . lispm-desktop-popup-parent)
+    (lispm-ui-menu-separator-height . lispm-desktop-popup-separator-height)
+    (lispm-ui-menu-small . lispm-desktop-popup-small)
+    (lispm-ui-menu-typed-keys . lispm-desktop-popup-typed-keys)
+    (lispm-ui-modal-areas . lispm-desktop-area-prefixes)
+    (lispm-ui-modal-typed-p . lispm-desktop-typed-event-p))
   "LispM UI's names of what moved from LispM Desktop, (NEW . OLD) each:
 the renames LispM Desktop makes, the other way round.")
 
@@ -326,6 +360,25 @@ Emacs without SVG makes the image otherwise, of the same text."
   "Alerts drawn, (MESSAGE DETAIL BUTTONS ICON) each: one of three buttons,
 one standing apart; a stop of two; a note of one; and one whose words are
 too long for Mac OS 9's width.")
+
+(defconst lispm-ui-golden--menus
+  `(((:label "Undo" :action ignore :key "C-/")
+     separator
+     (:label "Cut" :action ignore :enabled nil :key "C-w")
+     (:label "Paste" :action ignore :key "C-y")
+     (:label "Paste Again" :value again :checked t)
+     (:label "A label longer than the rest of them" :action ignore)
+     (:label "More" :submenu ((:label "Inner" :action ignore)))
+     (:label "Off")
+     separator
+     (:label "Preferences…" :action ignore :key "C-c ,"))
+    ((:label "Ada" :action ignore
+      :icon (image :type svg :width 16 :height 16
+                   :data "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#336699\"/></svg>"))
+     (:label "Store" :action ignore :checked t)
+     (:label "日本語のメニュー" :action ignore :key "M-RET")))
+  "Menus drawn: one of every kind of item, separators doubled at neither
+end; one with an icon, a check and Japanese words.")
 
 (defun lispm-ui-golden--intervals (string &optional only)
   "Return STRING with its properties, which `equal' alone ignores, an image
@@ -745,12 +798,59 @@ the glyph function gives them: see `lispm-ui-golden--form'."
                             (lispm-ui-golden--intervals
                              (lispm-ui-alert--text (nth 3 alert) (nth 0 alert) (nth 1 alert) (nth 2 alert)
                                                    pressed focused))))
-                    lispm-ui-golden--alerts '(nil save nil all) '(nil nil ok cancel))))))
+                    lispm-ui-golden--alerts '(nil save nil all) '(nil nil ok cancel)))))
+    ;; lispm-ui-menu.el
+    (menu-layouts
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (append
+        (mapcar (lambda (items)
+                  (list (lispm-ui-menu--rows items) (lispm-ui-menu--width items)
+                        (lispm-ui-menu--icon-room items) (mapcar #'lispm-ui-menu--key items)
+                        (mapcar #'lispm-ui-menu--enabled-p items)
+                        (lispm-ui-menu--index-at items 20) (lispm-ui-menu--index-at items 40)
+                        (lispm-ui-menu--step items nil 1) (lispm-ui-menu--step items 0 -1)
+                        (lispm-ui-menu--item-starting items nil ?p)
+                        (lispm-ui-menu--item-starting items 3 ?p)))
+                lispm-ui-golden--menus)
+        (let ((lispm-ui-menu-small t))
+          (list (lispm-ui-menu--rows (car lispm-ui-golden--menus))
+                (lispm-ui-menu--width (car lispm-ui-golden--menus))
+                (lispm-ui-menu--item-height) (lispm-ui-menu--label-x) (lispm-ui-menu--key-margin)))
+        (list (lispm-ui-menu--submenu-place (list :items (car lispm-ui-golden--menus) :x 100 :y 20 :width 140)
+                                            6 '((:label "Inner" :action ignore)) 1000)
+              (lispm-ui-menu--submenu-place (list :items (car lispm-ui-golden--menus) :x 100 :y 20 :width 140)
+                                            6 '((:label "Inner" :action ignore)) 300)
+              lispm-ui-menu-item-height lispm-ui-menu-separator-height lispm-ui-menu-label-x
+              lispm-ui-menu-key-margin lispm-ui-menu-icon-size))))
+    (menus-drawn
+     (append
+      (cl-mapcar (lambda (items palette highlight)
+                   (lispm-ui-golden--print (lispm-ui-draw-menu palette items (lispm-ui-menu--width items)
+                                                               highlight)))
+                 (append lispm-ui-golden--menus lispm-ui-golden--menus)
+                 (list (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)
+                       (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)
+                       (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)
+                       (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark))
+                 '(nil 0 6 1))
+      (let ((lispm-ui-menu-small t)
+            (palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+        (list (lispm-ui-golden--print (lispm-ui-draw-menu palette (car lispm-ui-golden--menus) 120 4))))))
+    (text-menus
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) t)))
+         (append
+          (cl-mapcar (lambda (items highlight)
+                       (list (lispm-ui-menu--rows items) (lispm-ui-menu--width items)
+                             (lispm-ui-golden--intervals
+                              (lispm-ui-menu--text items (lispm-ui-menu--width items) highlight))))
+                     lispm-ui-golden--menus '(3 0))
+          (list (lispm-ui-golden--intervals (lispm-ui-menu--text (car lispm-ui-golden--menus) 18 6))))))))
   "The cases compared, (NAME FORM) each, FORM in LispM UI's names.")
 
 (defconst lispm-ui-golden-xml-cases
   '(dom embed content-image raster-shapes raster-crisp raster-icons text-pictures icon-pictures
-        text-icons alerts-drawn text-alerts)
+        text-icons alerts-drawn text-alerts menus-drawn)
   "The cases reading XML, which an Emacs built without libxml2 cannot.")
 
 (defun lispm-ui-golden--rename (form names)

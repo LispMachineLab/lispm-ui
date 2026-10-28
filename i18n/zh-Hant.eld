@@ -19,4 +19,5 @@
   ("Picture: " . "圖片：")
   ("Not a picture: %s" . "不是圖片：%s")
   ("%s: fill this in" . "%s：請填寫")
-  ("Not a form" . "不是表單")))
+  ("Not a form" . "不是表單")
+  ("Menu: " . "選單：")))

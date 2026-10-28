@@ -120,6 +120,21 @@ text terminal counts a cell for eight pixels."
 
 ;;;; What the desktop drew
 
+(defmacro lispm-ui-test--with-faces-uncoloured (&rest body)
+  "Run BODY with LispM UI's text faces in no colour of their own, as
+before a palette colours them: what is drawn then takes its colours from
+the palette alone, whatever tests before coloured the faces in."
+  (declare (indent 0))
+  `(let ((saved (mapcar (lambda (face) (cons face (face-attribute face :foreground)))
+                        (seq-filter #'facep '(lispm-ui-title lispm-ui-list lispm-ui-small
+                                                             lispm-ui-menu-item lispm-ui-menu-item-highlight
+                                                             lispm-ui-menu-item-disabled)))))
+     (unwind-protect
+         (progn
+           (dolist (entry saved) (set-face-attribute (car entry) nil :foreground 'unspecified))
+           ,@body)
+       (dolist (entry saved) (set-face-attribute (car entry) nil :foreground (cdr entry))))))
+
 (require 'lispm-ui-golden (expand-file-name "test/lispm-ui-golden.el" lispm-ui-test--directory))
 
 (ert-deftest lispm-ui-test-draws-as-the-desktop-drew ()
@@ -131,13 +146,14 @@ Emacs's widgets where Emacs is of another version than wrote them."
          (emacs (alist-get :emacs golden)))
     (setq golden (assq-delete-all :emacs golden))
     (should (equal (mapcar #'car golden) (mapcar #'car lispm-ui-golden-cases)))
-    (pcase-dolist (`(,name ,form) lispm-ui-golden-cases)
-      (unless (or (and (memq name lispm-ui-golden-xml-cases)
-                       (not (fboundp 'libxml-parse-xml-region)))
-                  (and (memq name lispm-ui-golden-widget-cases)
-                       (not (eql emacs emacs-major-version))))
-        (should (equal (list name (lispm-ui-golden-eval form))
-                       (list name (alist-get name golden))))))))
+    (lispm-ui-test--with-faces-uncoloured
+      (pcase-dolist (`(,name ,form) lispm-ui-golden-cases)
+        (unless (or (and (memq name lispm-ui-golden-xml-cases)
+                         (not (fboundp 'libxml-parse-xml-region)))
+                    (and (memq name lispm-ui-golden-widget-cases)
+                         (not (eql emacs emacs-major-version))))
+          (should (equal (list name (lispm-ui-golden-eval form))
+                         (list name (alist-get name golden)))))))))
 
 ;;;; lispm-ui-palette
 
@@ -1002,26 +1018,27 @@ sized back."
 (ert-deftest lispm-ui-test-alert-text ()
   "An alert shows its message, its detail and a button per choice, framed
 as Mac OS 9 framed its alerts."
-  (let* ((palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
-         (lispm-ui-current-palette palette)
-         (buttons '(("Don’t Save" discard nil) ("Cancel" cancel cancel) ("Save" save default)))
-         (svg (lispm-ui-draw-alert palette 'caution "Save?" "Changes will be lost."
-                                   buttons nil nil))
-         (texts (mapcar #'dom-text (dom-by-tag svg 'text))))
-    (should (seq-find (lambda (text) (string-search "Save?" text)) texts))
-    (should (seq-find (lambda (text) (string-search "Changes will be lost." text)) texts))
-    (cl-flet ((at (x y) (lispm-ui-test--pixel svg x y))
-              (color (key) (upcase (plist-get palette key)))
-              (grey (level) (upcase (lispm-ui-grey palette level))))
-      (should (equal (at 0 30) (color :alert)))
-      (should (equal (at 1 30) (grey #xFF)))
-      (should (equal (at 30 1) (grey #xFF)))
-      (should (equal (at 50 40) (grey #xDD)))
-      (should (equal (at (- lispm-ui-alert-width 2) 30) (grey #x99)))
-      (should (equal (at (- lispm-ui-alert-width 1) 30) (color :alert-dark))))
-    (when (fboundp 'libxml-parse-xml-region)
-      ;; The caution sign, embedded.
-      (should (dom-by-tag svg 'path)))))
+  (lispm-ui-test--with-faces-uncoloured
+    (let* ((palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+           (lispm-ui-current-palette palette)
+           (buttons '(("Don’t Save" discard nil) ("Cancel" cancel cancel) ("Save" save default)))
+           (svg (lispm-ui-draw-alert palette 'caution "Save?" "Changes will be lost."
+                                     buttons nil nil))
+           (texts (mapcar #'dom-text (dom-by-tag svg 'text))))
+      (should (seq-find (lambda (text) (string-search "Save?" text)) texts))
+      (should (seq-find (lambda (text) (string-search "Changes will be lost." text)) texts))
+      (cl-flet ((at (x y) (lispm-ui-test--pixel svg x y))
+                (color (key) (upcase (plist-get palette key)))
+                (grey (level) (upcase (lispm-ui-grey palette level))))
+        (should (equal (at 0 30) (color :alert)))
+        (should (equal (at 1 30) (grey #xFF)))
+        (should (equal (at 30 1) (grey #xFF)))
+        (should (equal (at 50 40) (grey #xDD)))
+        (should (equal (at (- lispm-ui-alert-width 2) 30) (grey #x99)))
+        (should (equal (at (- lispm-ui-alert-width 1) 30) (color :alert-dark))))
+      (when (fboundp 'libxml-parse-xml-region)
+        ;; The caution sign, embedded.
+        (should (dom-by-tag svg 'path))))))
 
 (ert-deftest lispm-ui-test-alert-layout ()
   "Don't Save stands apart under the message; Cancel and the default button
@@ -1096,26 +1113,26 @@ C-f and C-b move the focus ring from button to button, and Space presses
 the button ringed; a button's own keys press it."
   (let ((buttons '(("Don’t Save" discard nil ?\M-d) ("Cancel" cancel cancel) ("Save" save default))))
     (lispm-ui-test--with-alert-keys
-     (cl-flet ((answer (events &optional given)
-                 (let ((unread-command-events events))
-                   (lispm-ui-alert-default 'caution "Save?" (or given buttons)))))
-       (should (eq (answer '(return)) 'save))
-       (should (eq (answer '(?\r)) 'save))
-       (should (eq (answer '(escape)) 'cancel))
-       (should (eq (answer '(?\C-g)) 'cancel))
-       (should (eq (answer '(escape) '(("OK" ok default))) 'ok))
-       (should (eq (answer '(?\M-d)) 'discard))
-       (should (eq (answer '(tab ?\s)) 'discard))
-       (should (eq (answer '(tab tab ?\s)) 'cancel))
-       (should (eq (answer '(?\C-f ?\C-f ?\C-f ?\s)) 'save))
-       (should (eq (answer '(backtab ?\s)) 'save))
-       (should (eq (answer '(?\C-b ?\C-b ?\s)) 'cancel))
-       ;; Space with no button ringed presses nothing.
-       (should (eq (answer '(?\s return)) 'save))
-       ;; C-n and C-p ring the buttons as Tab and Shift-Tab do.
-       (should (eq (answer '(?\C-n ?\s)) 'discard))
-       (should (eq (answer '(?\C-p ?\s)) 'save))
-       (should (eq (answer '(S-iso-lefttab ?\s)) 'save))))))
+      (cl-flet ((answer (events &optional given)
+                  (let ((unread-command-events events))
+                    (lispm-ui-alert-default 'caution "Save?" (or given buttons)))))
+        (should (eq (answer '(return)) 'save))
+        (should (eq (answer '(?\r)) 'save))
+        (should (eq (answer '(escape)) 'cancel))
+        (should (eq (answer '(?\C-g)) 'cancel))
+        (should (eq (answer '(escape) '(("OK" ok default))) 'ok))
+        (should (eq (answer '(?\M-d)) 'discard))
+        (should (eq (answer '(tab ?\s)) 'discard))
+        (should (eq (answer '(tab tab ?\s)) 'cancel))
+        (should (eq (answer '(?\C-f ?\C-f ?\C-f ?\s)) 'save))
+        (should (eq (answer '(backtab ?\s)) 'save))
+        (should (eq (answer '(?\C-b ?\C-b ?\s)) 'cancel))
+        ;; Space with no button ringed presses nothing.
+        (should (eq (answer '(?\s return)) 'save))
+        ;; C-n and C-p ring the buttons as Tab and Shift-Tab do.
+        (should (eq (answer '(?\C-n ?\s)) 'discard))
+        (should (eq (answer '(?\C-p ?\s)) 'save))
+        (should (eq (answer '(S-iso-lefttab ?\s)) 'save))))))
 
 (ert-deftest lispm-ui-test-alert-fallback-keys ()
   "An alert asked in the minibuffer has a letter for each button, typed
@@ -1147,22 +1164,22 @@ timer, where Emacs would pop up a dialog box."
 the right, Cancel to its left, a button coming before Cancel standing
 apart under the message, none overlapping, every line as wide."
   (lispm-ui-test--on-tty
-   (let* ((buttons '(("Don’t Save" discard nil) ("Cancel" cancel cancel) ("Save" save default)))
-          (layout (lispm-ui-alert--text-layout
-                   "Save changes to the document “notes.org” before closing?"
-                   "If you don’t save, your changes will be lost." buttons))
-          (w (plist-get layout :width)))
-     (pcase-let ((`((,_ discard ,_ ,dx ,_ ,dw) (,_ cancel ,_ ,cx ,_ ,cw) (,_ save ,_ ,sx ,_ ,sw))
-                  (plist-get layout :buttons)))
-       (should (= (+ sx sw) (- w 2)))
-       (should (< (+ cx cw) sx))
-       (should (= dx lispm-ui-alert--text-x))
-       (should (< (+ dx dw) cx)))
-     (let ((lines (split-string (lispm-ui-alert--text
-                                 'caution "Save changes?" "Detail." buttons nil 'cancel)
-                                "\n")))
-       (should (seq-every-p (lambda (line) (= (string-width line) lispm-ui-text-alert-width)) lines))
-       (should (string-match-p "\\[ Save \\]" (car (last lines 2))))))))
+    (let* ((buttons '(("Don’t Save" discard nil) ("Cancel" cancel cancel) ("Save" save default)))
+           (layout (lispm-ui-alert--text-layout
+                    "Save changes to the document “notes.org” before closing?"
+                    "If you don’t save, your changes will be lost." buttons))
+           (w (plist-get layout :width)))
+      (pcase-let ((`((,_ discard ,_ ,dx ,_ ,dw) (,_ cancel ,_ ,cx ,_ ,cw) (,_ save ,_ ,sx ,_ ,sw))
+                   (plist-get layout :buttons)))
+        (should (= (+ sx sw) (- w 2)))
+        (should (< (+ cx cw) sx))
+        (should (= dx lispm-ui-alert--text-x))
+        (should (< (+ dx dw) cx)))
+      (let ((lines (split-string (lispm-ui-alert--text
+                                  'caution "Save changes?" "Detail." buttons nil 'cancel)
+                                 "\n")))
+        (should (seq-every-p (lambda (line) (= (string-width line) lispm-ui-text-alert-width)) lines))
+        (should (string-match-p "\\[ Save \\]" (car (last lines 2))))))))
 
 (defun lispm-ui-test--pixel (svg x y)
   "Return the colour SVG paints the pixel at X, Y with, upcased, or nil.
@@ -1178,6 +1195,273 @@ drawing functions draw their pixels as rectangles."
                      (<= y0 (+ y 0.5) (+ y0 (dom-attr node 'height))))
             (setq color (upcase fill))))))
     color))
+
+;;;; lispm-ui-menu
+
+(defconst lispm-ui-test--dark '("#282a36" "#f8f8f2" "#6272a4" "#bd93f9")
+  "The colours a dark theme gives a palette.")
+
+(ert-deftest lispm-ui-test-modal-typed-p ()
+  "A character or a function key was typed; a mouse event was not, nor the
+symbol of the part of the frame one comes over."
+  (should (lispm-ui-modal-typed-p ?a))
+  (should (lispm-ui-modal-typed-p 'return))
+  (should (lispm-ui-modal-typed-p 'f10))
+  (should-not (lispm-ui-modal-typed-p 'mode-line))
+  (should-not (lispm-ui-modal-typed-p '(mouse-1 nil)))
+  (should-not (lispm-ui-modal-typed-p nil)))
+
+(ert-deftest lispm-ui-test-menu-falls-back ()
+  "Without a palette, or a display to pop up on, a menu asks in the
+minibuffer, its submenus' items after their labels, and runs what is
+chosen; choices are read there too, as LispM UI reads them by default."
+  (should (eq lispm-ui-choose-function #'lispm-ui-choose-default))
+  (let ((ran nil) (offered nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt choices &rest _) (setq offered (mapcar #'car choices)) "More › Two")))
+      (should (equal (plist-get (lispm-ui-menu `((:label "One" :action ignore)
+                                                 (:label "Off" :action ignore :enabled nil)
+                                                 separator
+                                                 (:label "More" :submenu ((:label "Two" :action ,(lambda () (setq ran t)))))))
+                                :label)
+                     "Two"))
+      (should ran)
+      (should (equal offered '("One" "More › Two")))))
+  (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "Big")))
+    (should (equal (lispm-ui-choose '((small . "Small") (big . "Big")) 'small) '(big)))))
+
+(ert-deftest lispm-ui-test-choose-in-a-menu ()
+  "Where a menu can be drawn, choices are its items, the current one
+checked, opened under the place they are chosen for; the item chosen
+gives its value."
+  (let ((offered nil))
+    (cl-letf (((symbol-function 'lispm-ui-popup-available-p) (lambda () t))
+              ((symbol-function 'lispm-ui-menu-choose)
+               (lambda (items &rest place) (setq offered (cons items place)) (nth 1 items))))
+      (with-temp-buffer
+        (should (equal (lispm-ui-choose-default '((small . "Small") (big . "Big")) 'small) '(big)))
+        (should (equal (car offered) '((:label "Small" :value small :checked t)
+                                       (:label "Big" :value big :checked nil)))))
+      (cl-letf (((symbol-function 'lispm-ui-menu-choose) #'ignore))
+        (should-not (lispm-ui-choose-default '((small . "Small")) nil))))))
+
+(defmacro lispm-ui-test--with-menu-keys (&rest body)
+  "Run BODY where menus read the events queued in `unread-command-events',
+drawn nowhere.  In BODY, `opened' lists the items of each level opened,
+the latest first."
+  (declare (indent 0))
+  `(let ((opened nil))
+     (cl-letf (((symbol-function 'lispm-ui-menu--level)
+                (lambda (items x y &optional _align)
+                  (push items opened)
+                  (list :frame nil :items items :width 100 :highlight nil :x (or x 0) :y (or y 0))))
+               ((symbol-function 'lispm-ui-menu--draw-level) #'ignore)
+               ((symbol-function 'lispm-ui-popup-dispose) #'ignore)
+               ((symbol-function 'sit-for) #'ignore)
+               ((symbol-function 'redisplay) #'ignore))
+       ,@body)))
+
+(ert-deftest lispm-ui-test-menu-keys-choose ()
+  "A menu is walked from the keyboard: opened from it, it starts on its
+first item; C-n and C-p pass over separators and what cannot be chosen;
+a letter goes to the item it starts; C-f enters the submenu of the item
+it is on, as Return does, and C-b leaves it; Return chooses, Escape and
+C-g cancel.  Walking the menu bar, C-b and C-f at the top level step to
+the menus beside it."
+  (let ((items '((:label "Undo" :action ignore) separator (:label "Cut" :action ignore :enabled nil)
+                 (:label "Paste" :action ignore)
+                 (:label "More" :submenu ((:label "Inner" :action ignore) (:label "Other" :action ignore))))))
+    (lispm-ui-test--with-menu-keys
+      (cl-flet ((choose (events)
+                  (let ((unread-command-events events)
+                        (last-input-event ?\C-c))
+                    (plist-get (lispm-ui-menu-choose items 0 0) :label))))
+        (should (equal (choose '(return)) "Undo"))
+        (should (equal (choose '(?\C-n return)) "Paste"))
+        (should (equal (choose '(?\C-n ?\C-n ?\C-n return)) "Undo"))
+        ;; Return on an item holding a submenu enters it.
+        (should (equal (choose '(?\C-p return return)) "Inner"))
+        (should (equal (choose '(?p return)) "Paste"))
+        (should (equal (choose '(?m ?\C-f return)) "Inner"))
+        (should (equal (choose '(?m ?\C-f ?\C-n return)) "Other"))
+        (should (equal (choose '(?m ?\C-f ?\C-b ?\C-p return)) "Paste"))
+        (should (equal (choose '(?m return return)) "Inner"))
+        (should-not (choose '(escape)))
+        (should-not (choose '(?\C-g)))
+        (let ((lispm-ui-menu-bar-step t))
+          (should (eql (catch 'lispm-ui-menu-bar-step (choose '(?\C-b))) -1))
+          (should (eql (catch 'lispm-ui-menu-bar-step (choose '(?\C-f))) 1))
+          (should (equal (catch 'lispm-ui-menu-bar-step (choose '(?m ?\C-f return))) "Inner")))))))
+
+(ert-deftest lispm-ui-test-menu-runs-the-item ()
+  "A menu runs the action of the item chosen, a command interactively, as
+a menu of its own, not a step of a menu bar walk."
+  (let ((ran nil))
+    (lispm-ui-test--with-menu-keys
+      (cl-letf (((symbol-function 'lispm-ui-popup-available-p) (lambda () t)))
+        (let ((unread-command-events '(return))
+              (last-input-event ?\C-c)
+              (lispm-ui-menu-bar-step t)
+              (lispm-ui-menu-small t))
+          (lispm-ui-menu `((:label "Go" :action ,(lambda () (setq ran (list lispm-ui-menu-bar-step
+                                                                            lispm-ui-menu-small))))))
+          (should (equal ran '(nil nil))))))))
+
+(ert-deftest lispm-ui-test-menu-text ()
+  "A menu is drawn as Mac OS 9's: lit and shaded edges, items sixteen pixels
+tall, separators engraved, checks marked, the item under the mouse in the
+variation colour, disabled items greyed."
+  (lispm-ui-test--with-faces-uncoloured
+    (let* ((palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+           (lispm-ui-current-palette palette)
+           (items '((:label "One" :action ignore :checked t)
+                    separator
+                    (:label "Two" :action ignore :enabled nil)
+                    (:label "Three" :action ignore)
+                    (:label "More" :submenu (( :label "Four" :action ignore)))))
+           (svg (lispm-ui-draw-menu palette items 200 3))
+           (texts (dom-by-tag svg 'text)))
+      (should (equal (car (lispm-ui-menu--rows items)) '(0 16 22 38 54)))
+      (should (equal (lispm-ui-test--size svg) '(200 . 70)))
+      (cl-flet ((at (x y) (lispm-ui-test--pixel svg x y))
+                (ink (label) (dom-attr (seq-find (lambda (text) (string-search label (dom-text text))) texts)
+                                       'fill))
+                (color (key) (upcase (plist-get palette key)))
+                (grey (level) (upcase (lispm-ui-grey palette level))))
+        (should (equal (at 50 0) (grey #xFF)))
+        (should (equal (at 0 8) (grey #xFF)))
+        (should (equal (at 199 8) (grey #x99)))
+        (should (equal (at 50 69) (grey #x99)))
+        ;; The separator, engraved across the whole width.
+        (should (equal (at 0 18) (grey #x88)))
+        (should (equal (at 199 19) (grey #xFF)))
+        ;; Three, under the mouse.
+        (should (equal (at 50 45) (color :highlight)))
+        (should (equal (at 0 45) (color :thumb-dark)))
+        (should (equal (at 199 45) (color :highlight-dark)))
+        (should (equal (upcase (ink "Three")) (color :highlight-text)))
+        (should (equal (upcase (ink "Two")) (color :dim)))
+        ;; SVG text carries non-ASCII characters as references.
+        (should (ink (format "&#%d;" ?✓)))
+        ;; More's submenu triangle.
+        (should (equal (at 190 61) "#000000")))
+      ;; The item under a y.
+      (should (= (lispm-ui-menu--index-at items 40) 3))
+      (should-not (lispm-ui-menu--index-at items 18))
+      (should-not (lispm-ui-menu--index-at items 25))
+      ;; Moving down from One skips the separator and the disabled Two.
+      (should (= (lispm-ui-menu--step items 0 1) 3))
+      (should (= (lispm-ui-menu--step items 3 1) 4))
+      ;; A dark theme greys disabled items in its own dim colour.
+      (let* ((dracula (apply #'lispm-ui-derive-palette lispm-ui-test--dark))
+             (dark (lispm-ui-draw-menu dracula items 200 nil)))
+        (should (equal (dom-attr (seq-find (lambda (text) (string-search "Two" (dom-text text)))
+                                           (dom-by-tag dark 'text))
+                                 'fill)
+                       (plist-get dracula :dim)))))))
+
+(ert-deftest lispm-ui-test-small-menu ()
+  "A small menu, as the Control Strip's, has items 13 pixels tall in the
+small system font, labels 15 pixels in."
+  (lispm-ui-test--with-faces-uncoloured
+    (let* ((palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+           (lispm-ui-current-palette palette)
+           (lispm-ui-menu-small t)
+           (items '((:label "One" :action ignore) (:label "Two" :action ignore)))
+           (svg (lispm-ui-draw-menu palette items 100 1)))
+      (should (equal (lispm-ui-test--size svg) '(100 . 26)))
+      (should (equal (lispm-ui-test--pixel svg 50 20) (upcase (plist-get palette :highlight))))
+      (should (= (lispm-ui-menu--width items)
+                 (+ 15 (lispm-ui-text-width "Two" 'lispm-ui-small) 11)))
+      (should (seq-every-p (lambda (text) (= (dom-attr text 'x) 15))
+                           (seq-remove (lambda (text) (string-search "&#" (dom-text text)))
+                                       (dom-by-tag svg 'text)))))))
+
+(ert-deftest lispm-ui-test-menu-icons ()
+  "A menu whose items have icons shows each before its label, as Mac OS 9's
+Apple menu did: the labels move over to make room."
+  (let* ((palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+         (lispm-ui-current-palette palette)
+         (icon `(image :type png :data ,(base64-decode-string "iVBORw0KGgo=")))
+         (items `((:label "Blocker" :action ignore :icon ,icon) (:label "Store" :action ignore)))
+         (svg (lispm-ui-draw-menu palette items 200 nil))
+         (images (dom-by-tag svg 'image)))
+    (should (= (length images) 1))
+    (should (= (dom-attr (car images) 'x) (lispm-ui-menu--label-x)))
+    (should (seq-every-p (lambda (text) (= (dom-attr text 'x) (+ (lispm-ui-menu--label-x) 20)))
+                         (dom-by-tag svg 'text)))
+    (should (= (lispm-ui-menu--width items)
+               (+ 20 (lispm-ui-menu--width (mapcar (lambda (item) (plist-put (copy-sequence item) :icon nil))
+                                                   items)))))))
+
+(ert-deftest lispm-ui-test-submenu-turns-at-the-edge ()
+  "A submenu opens beside its item, or on the menu's left when the right
+has no room, as Mac OS 9's did at the screen's edge."
+  (let* ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+         (items '((:label "One" :action ignore) (:label "More" :submenu ((:label "Two" :action ignore)))))
+         (submenu (lispm-ui-menu--submenu (nth 1 items)))
+         (level (list :items items :x 100 :y 20 :width 80))
+         (width (lispm-ui-menu--width submenu)))
+    (should (equal (lispm-ui-menu--submenu-place level 1 submenu 1000) '(178 35 nil)))
+    (should (equal (lispm-ui-menu--submenu-place level 1 submenu (+ 178 width 1)) '(102 35 right)))))
+
+(ert-deftest lispm-ui-test-menu-keys ()
+  "Key equivalents are keyboard sequences only."
+  (should (lispm-ui-menu-keyboard-p (kbd "C-c a l")))
+  (should-not (lispm-ui-menu-keyboard-p [C-M-drag-mouse-1]))
+  (should-not (lispm-ui-menu-keyboard-p [menu-bar file open])))
+
+(ert-deftest lispm-ui-test-menu-typed-keys ()
+  "Menus are walked from the keyboard: a typed letter goes to the next
+enabled item it starts, and the keys shown beside items can be typed:
+no function keys, and no Super keys where no key is Super."
+  (let ((items '((:label "Undo" :action ignore) separator (:label "Paste" :action ignore)
+                 (:label "Print" :action ignore :enabled nil)
+                 (:label " paste again" :action ignore))))
+    (should (= (lispm-ui-menu--item-starting items nil ?p) 2))
+    (should (= (lispm-ui-menu--item-starting items 2 ?P) 4))
+    (should (= (lispm-ui-menu--item-starting items 4 ?p) 2))
+    (should-not (lispm-ui-menu--item-starting items nil ?z)))
+  (should (lispm-ui-menu-keyboard-p (kbd "C-x h")))
+  (should (lispm-ui-menu-keyboard-p (kbd "M-RET")))
+  (should-not (lispm-ui-menu-keyboard-p (kbd "<f10>")))
+  (should-not (lispm-ui-menu-keyboard-p (kbd "<open>")))
+  (should-not (lispm-ui-menu-keyboard-p (kbd "M-<down>")))
+  (should-not (lispm-ui-menu-keyboard-p (kbd "<mouse-1>")))
+  (let ((window-system 'ns) (ns-command-modifier 'meta) (ns-alternate-modifier 'none))
+    (should-not (lispm-ui-menu-keyboard-p (kbd "s-a"))))
+  (should (lispm-ui-menu-keyboard-p (kbd "M-c"))))
+
+(ert-deftest lispm-ui-test-tty-menu ()
+  "On a text terminal a menu is text, a line an item as wide as the menu: a
+check mark before the checked, the key equivalent flush right, a rule
+for a separator; the item highlighted and those disabled in their faces."
+  (lispm-ui-test--on-tty
+    (let* ((items `((:label "Open" :action ,(lambda () nil) :key "C-x C-f")
+                    separator
+                    (:label "Saved" :action ,(lambda () nil) :checked t)
+                    (:label "Gone" :enabled nil)))
+           (lines (split-string (lispm-ui-menu--text items 24 0) "\n")))
+      (should (= (length lines) 4))
+      (should (seq-every-p (lambda (line) (= (string-width line) 24)) lines))
+      (should (string-match-p "\\`  Open +C-x C-f \\'" (nth 0 lines)))
+      (should (equal (substring-no-properties (nth 1 lines)) (make-string 24 ?─)))
+      (should (string-prefix-p "✓ Saved" (nth 2 lines)))
+      (should (memq 'lispm-ui-menu-item-highlight (ensure-list (get-text-property 2 'face (nth 0 lines)))))
+      (should (memq 'lispm-ui-menu-item-disabled (ensure-list (get-text-property 2 'face (nth 3 lines))))))
+    (should (= (lispm-ui-menu--item-height) 1))
+    (should (equal (cdr (lispm-ui-menu--rows '((:label "a") separator (:label "b")))) 3))))
+
+(ert-deftest lispm-ui-test-choose-without-menus ()
+  "Where no menu can be drawn, a pop-up menu's choices are read in the
+minibuffer."
+  (cl-letf (((symbol-function 'lispm-ui-popup-available-p) #'ignore)
+            ((symbol-function 'completing-read) (lambda (&rest _) "Big")))
+    (should (equal (lispm-ui-choose-default '((small . "Small") (big . "Big")) 'small) '(big)))))
+
+(defun lispm-ui-test--size (svg)
+  "Return the width and height of SVG as a cons."
+  (cons (dom-attr svg 'width) (dom-attr svg 'height)))
 
 ;;;; lispm-ui-form
 

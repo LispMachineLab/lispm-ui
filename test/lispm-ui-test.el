@@ -92,6 +92,20 @@ LispM UI and of LispM Kit, and the main file every part."
         (unless (member feature '("lispm-ui" "lispm-form"))
           (should (string-search (format "(require '%s)" feature) main)))))))
 
+(ert-deftest lispm-ui-test-installed-without-tests ()
+  "Installed as a package, LispM UI's tests are not byte-compiled with it:
+they load what only a checkout has, as the goldens, and compiling them
+would report an error where nothing is wrong."
+  (require 'package)
+  (let ((ignored (package--parse-elpaignore
+                  (package-desc-create :name 'lispm-ui :dir lispm-ui-test--directory))))
+    (should (seq-some (lambda (regexp)
+                        (string-match-p regexp (expand-file-name "test" lispm-ui-test--directory)))
+                      ignored))
+    (should-not (seq-some (lambda (regexp)
+                            (string-match-p regexp (expand-file-name "lispm-ui.el" lispm-ui-test--directory)))
+                          ignored))))
+
 ;;;; lispm-ui-base
 
 (ert-deftest lispm-ui-test-base ()

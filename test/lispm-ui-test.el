@@ -1825,6 +1825,55 @@ the line break of a paste taken out."
           (should (equal submitted '((user . "me") (password . " a*bc")))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
+(ert-deftest lispm-ui-test-form-password-characters ()
+  "A password keeps any character typed or pasted, its buffer holding stars."
+  (let ((buffer (lispm-ui-form "Account" '((password :type password :label "Password"))
+                               :values '((password . "ä中* "))))
+        (kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (text "pä中* "))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (should (equal (lispm-ui-test--form-text 'password) "****"))
+          (let ((field (alist-get 'password lispm-ui-form--widgets)))
+            (should (equal (widget-value field) "ä中* "))
+            (delete-region (widget-field-start field) (widget-field-text-end field))
+            (execute-kbd-macro (vconcat text))
+            (should (equal (lispm-ui-form-value 'password) text))
+            (should (equal (widget-value field) text))
+            (should (equal (lispm-ui-test--form-text 'password) "*****"))
+            ;; A paste in the middle keeps its spaces and loses its line breaks.
+            (execute-kbd-macro (kbd "C-a C-f"))
+            (kill-new "é\n中\r* ")
+            (execute-kbd-macro (kbd "C-y"))
+            (setq text "pé中* ä中* ")
+            (should (equal (lispm-ui-form-value 'password) text))
+            (should (equal (widget-value field) text))
+            (should (equal (lispm-ui-test--form-text 'password) (make-string (length text) ?*)))
+            ;; More than its padded size still scrolls to show point.
+            (execute-kbd-macro (kbd "C-e"))
+            (kill-new (concat (make-string 210 ?中) " \n"))
+            (execute-kbd-macro (kbd "C-y"))
+            (setq text (concat text (make-string 210 ?中) " "))
+            (should (equal (lispm-ui-form-value 'password) text))
+            (should (equal (widget-value field) text))
+            (should (equal (lispm-ui-test--form-text 'password) (make-string (length text) ?*)))
+            (should (= (point) (widget-field-text-end field)))
+            (should (equal (lispm-ui-test--form-shown 'password) (make-string (1- lispm-ui-form-width) ?*)))
+            (lispm-ui-form-redraw)
+            (setq field (alist-get 'password lispm-ui-form--widgets))
+            (should (equal (widget-value field) text))
+            (should (equal (lispm-ui-test--form-text 'password) (make-string (length text) ?*)))
+            ;; Copying and killing the field gives only its stars.
+            (copy-region-as-kill (widget-field-start field) (widget-field-text-end field))
+            (should (equal (current-kill 0) (make-string (length text) ?*)))
+            (kill-region (widget-field-start field) (widget-field-text-end field))
+            (should (equal (current-kill 0) (make-string (length text) ?*)))
+            (should (equal (widget-value field) ""))
+            (should-not (lispm-ui-form-value 'password))))
+      (kill-buffer buffer))))
+
 (ert-deftest lispm-ui-test-form-on-change ()
   "A field's :on-change is called with its value each time it is changed,
 and may change the others: the form is drawn again once a text's change

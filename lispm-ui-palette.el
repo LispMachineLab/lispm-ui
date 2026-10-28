@@ -233,10 +233,13 @@ look's families."
         (chrome (lispm-ui-color :chrome)))
     (set-face-attribute 'lispm-ui-title nil :foreground text)
     (set-face-attribute 'lispm-ui-small nil :inherit 'lispm-ui-list :height 90 :weight 'normal)
+    ;; A field is drawn over a theme's own `widget-field': none of the
+    ;; lines that theme draws about it are its.
     (set-face-attribute 'lispm-ui-field nil
                         :inherit 'lispm-ui-list :background (lispm-ui-color :content)
                         :foreground text
-                        :box `(:line-width (1 . 1) :color ,(lispm-ui-color :outline)))
+                        :box `(:line-width (1 . 1) :color ,(lispm-ui-color :outline))
+                        :underline nil :overline nil :strike-through nil)
     ;; Emacs draws one box about text, so the ring stands for the frame
     ;; within it while the field has the keyboard.
     (set-face-attribute 'lispm-ui-field-focused nil

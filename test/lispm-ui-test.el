@@ -179,6 +179,10 @@ be read leaves the palette as it was."
       (should (= lispm-ui-palette-generation 1))
       (should (= changed 1))
       (should (equal (face-attribute 'lispm-ui-field :background) "#DDDDDD"))
+      ;; Drawn over a theme's `widget-field', a field takes none of its lines.
+      (dolist (line '(:underline :overline :strike-through))
+        (should (null (face-attribute 'lispm-ui-field line)))
+        (should (null (face-attribute 'lispm-ui-form-area line))))
       (should (equal (plist-get (face-attribute 'lispm-ui-field-focused :box) :color) "#6363CE"))
       (should (equal (face-attribute 'lispm-ui-button :background) (lispm-ui-color :chrome)))
       (should (eq (face-attribute 'lispm-ui-small :inherit) 'lispm-ui-list))

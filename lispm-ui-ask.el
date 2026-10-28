@@ -36,10 +36,12 @@
 ;;                    a file, as a dialog shows a folder's
 ;;
 ;; Each is answered in the minibuffer, and never in the system's own
-;; dialogs, unless an interface draws it: `lispm-ui-alert-function',
+;; dialogs, unless something draws it: `lispm-ui-alert-function',
 ;; `lispm-ui-choose-function' and `lispm-ui-choose-file-function' are
 ;; called instead when set, with the same arguments, and return what
-;; these do.  The keyboard answers each, whatever draws it.
+;; these do.  An alert is drawn by LispM UI itself, by default, once it
+;; has a palette to draw in, see lispm-ui-alert.el.  The keyboard
+;; answers each, whatever draws it.
 
 ;;; Code:
 
@@ -47,13 +49,18 @@
 (require 'seq)
 (require 'subr-x)
 (require 'lispm-ui-i18n)
+(require 'lispm-ui-palette)
 
 ;;;; Alerts
 
-(defvar lispm-ui-alert-function nil
+(autoload 'lispm-ui-alert-default "lispm-ui-alert")
+
+(defvar lispm-ui-alert-function #'lispm-ui-alert-default
   "Function showing an alert, or nil for the minibuffer.
 It is called with the arguments of `lispm-ui-alert', and returns the
-value of the button chosen.")
+value of the button chosen.  The default, `lispm-ui-alert-default',
+draws it where a panel can pop up, and asks in the minibuffer
+elsewhere.")
 
 (defun lispm-ui--alert-keys (buttons)
   "Return a key for each of BUTTONS, as an alert takes them, as (KEY
@@ -98,12 +105,21 @@ button, quitting choosing the cancel button."
      message buttons detail
      (nth 1 (seq-find (lambda (button) (eq (nth 2 button) 'cancel)) buttons)))))
 
+(defun lispm-ui--alert-shown-p ()
+  "Return non-nil when an alert is shown rather than asked in the
+minibuffer: by a `lispm-ui-alert-function' of its own, or by LispM UI's
+once it has a palette to draw in."
+  (and lispm-ui-alert-function
+       (or (not (eq lispm-ui-alert-function #'lispm-ui-alert-default))
+           lispm-ui-current-palette)))
+
 (defun lispm-ui-confirm (question &optional detail action)
   "Ask QUESTION, DETAIL under it, and return non-nil when the person agrees.
 ACTION names what agreeing does, as \"Delete\": the label of the
 default button of the alert asking, by default OK, beside Cancel.
-Without `lispm-ui-alert-function', `yes-or-no-p' asks."
-  (if lispm-ui-alert-function
+Where no alert is shown, see `lispm-ui--alert-shown-p', `yes-or-no-p'
+asks."
+  (if (lispm-ui--alert-shown-p)
       (eq (lispm-ui-alert 'caution question
                           `((,(lispm-ui-tr "Cancel") nil cancel)
                             (,(or action (lispm-ui-tr "OK")) t default))

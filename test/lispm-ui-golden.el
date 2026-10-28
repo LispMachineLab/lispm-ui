@@ -186,7 +186,33 @@
     (lispm-ui-icon . lispm-desktop-platinum-icon)
     (lispm-ui-icon-file . lispm-desktop-platinum-icon-file)
     (lispm-ui-icon-picture . lispm-desktop-platinum-icon-picture)
-    (lispm-ui-text-icon . lispm-desktop-platinum--text-icon))
+    (lispm-ui-text-icon . lispm-desktop-platinum--text-icon)
+    ;; lispm-ui-popup.el
+    (lispm-ui-popup-available-p . lispm-desktop-popup-available-p)
+    (lispm-ui-popup-dispose . lispm-desktop-popup-dispose)
+    (lispm-ui-popup-fill . lispm-desktop-popup-fill)
+    (lispm-ui-popup-graphic-p . lispm-desktop-popup-graphic-p)
+    (lispm-ui-popup-hold-size . lispm-desktop-popup-hold-size)
+    (lispm-ui-popup-make-frame . lispm-desktop-popup-make-frame)
+    (lispm-ui-popup-set-size . lispm-desktop-popup-set-size)
+    (lispm-ui-popup-show . lispm-desktop-popup-show)
+    (lispm-ui-popup-text-p . lispm-desktop-popup-text-p)
+    ;; lispm-ui-alert.el
+    (lispm-ui-alert . lispm-desktop-popup-alert)
+    (lispm-ui-alert--text . lispm-desktop-popup--text-alert)
+    (lispm-ui-alert--text-button-width . lispm-desktop-popup--text-button-width)
+    (lispm-ui-alert--text-icon-size . lispm-desktop-popup--text-alert-icon-size)
+    (lispm-ui-alert--text-layout . lispm-desktop-popup--text-alert-layout)
+    (lispm-ui-alert--text-x . lispm-desktop-popup--text-alert-x)
+    (lispm-ui-alert--wrap . lispm-desktop-popup--wrap)
+    (lispm-ui-alert-button-gap . lispm-desktop-popup-button-gap)
+    (lispm-ui-alert-layout . lispm-desktop-popup--alert-layout)
+    (lispm-ui-alert-open . lispm-desktop-popup-open-alert)
+    (lispm-ui-alert-text-x . lispm-desktop-popup-alert-text-x)
+    (lispm-ui-alert-width . lispm-desktop-popup-alert-width)
+    (lispm-ui-draw-alert . lispm-desktop-popup-draw-alert)
+    (lispm-ui-svg-alert-contents . lispm-desktop-popup-svg-alert-contents)
+    (lispm-ui-text-alert-width . lispm-desktop-popup-text-alert-width))
   "LispM UI's names of what moved from LispM Desktop, (NEW . OLD) each:
 the renames LispM Desktop makes, the other way round.")
 
@@ -260,6 +286,22 @@ Emacs without SVG makes the image otherwise, of the same text."
           "</svg>")
   "An SVG of pixels drawn as rectangles, asking for crisp edges, as Mac OS
 9's icons do.")
+
+(defconst lispm-ui-golden--alerts
+  '(("Save changes to the document “notes.org” before closing?"
+     "If you don’t save, your changes will be lost."
+     (("Don’t Save" discard nil ?\M-d) ("Cancel" cancel cancel) ("Save" save default))
+     caution)
+    ("The disk is full." "Throw away what you do not need, then try again."
+     (("Cancel" cancel cancel) ("Save" save default))
+     stop)
+    ("Done." nil (("OK" ok default)) note)
+    ("„Test“ deinstallieren?" "Alles, was es installiert hat, wird entfernt."
+     (("Alles deinstallieren" all nil) ("Abbrechen" cancel cancel) ("Deinstallieren" item default))
+     caution))
+  "Alerts drawn, (MESSAGE DETAIL BUTTONS ICON) each: one of three buttons,
+one standing apart; a stop of two; a note of one; and one whose words are
+too long for Mac OS 9's width.")
 
 (defun lispm-ui-golden--intervals (string &optional only)
   "Return STRING with its properties, which `equal' alone ignores, an image
@@ -589,12 +631,49 @@ the glyph function gives them: see `lispm-ui-golden--form'."
      (mapcar (lambda (arguments)
                (mapcar #'lispm-ui-golden--intervals (apply #'lispm-ui-icon-picture arguments)))
              `((caution 16 nil "#DDDDDD") (stop 16 t "#DDDDDD") (note 32 nil "#282a36")
-               (,(expand-file-name "icons/caution.svg" lispm-ui-directory) 16 nil "#DDDDDD")))))
+               (,(expand-file-name "icons/caution.svg" lispm-ui-directory) 16 nil "#DDDDDD"))))
+    ;; lispm-ui-alert.el
+    (alert-layouts
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (mapcar (lambda (alert) (apply #'lispm-ui-alert-layout (seq-take alert 3))) lispm-ui-golden--alerts)))
+    (alerts-drawn
+     (cl-mapcar (lambda (alert palette pressed focused)
+                  (lispm-ui-golden--print
+                   (lispm-ui-draw-alert palette (nth 3 alert) (nth 0 alert) (nth 1 alert) (nth 2 alert)
+                                        pressed focused)))
+                lispm-ui-golden--alerts
+                (list (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)
+                      (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)
+                      (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)
+                      (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark))
+                '(nil save nil all) '(nil nil ok cancel)))
+    (alert-contents
+     (let ((palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--dark)))
+       (lispm-ui-golden--svg 400 160
+                             (lambda (svg)
+                               (lispm-ui-svg-alert-contents
+                                svg (apply #'lispm-ui-alert-layout (seq-take (car lispm-ui-golden--alerts) 3))
+                                40 10 palette 'discard 'save "#FF0000")))))
+    (alert-wrap
+     (list (lispm-ui-alert--wrap "Save changes to the document “notes.org” before closing?" 120 'lispm-ui-title)
+           (lispm-ui-alert--wrap "保存对文稿“笔记”的更改吗？若不保存，更改将会丢失。" 60 'lispm-ui-list)
+           lispm-ui-alert-width lispm-ui-alert-text-x lispm-ui-alert-button-gap lispm-ui-text-alert-width
+           lispm-ui-alert--text-x lispm-ui-alert--text-icon-size
+           (lispm-ui-alert--text-button-width "Don’t Save")))
+    (text-alerts
+     (let ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette ',lispm-ui-golden--classic)))
+       (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) t)))
+         (cl-mapcar (lambda (alert pressed focused)
+                      (list (apply #'lispm-ui-alert--text-layout (seq-take alert 3))
+                            (lispm-ui-golden--intervals
+                             (lispm-ui-alert--text (nth 3 alert) (nth 0 alert) (nth 1 alert) (nth 2 alert)
+                                                   pressed focused))))
+                    lispm-ui-golden--alerts '(nil save nil all) '(nil nil ok cancel))))))
   "The cases compared, (NAME FORM) each, FORM in LispM UI's names.")
 
 (defconst lispm-ui-golden-xml-cases
   '(dom embed content-image raster-shapes raster-crisp raster-icons text-pictures icon-pictures
-        text-icons)
+        text-icons alerts-drawn text-alerts)
   "The cases reading XML, which an Emacs built without libxml2 cannot.")
 
 (defun lispm-ui-golden--rename (form names)
@@ -642,6 +721,7 @@ What they make is written in LispM UI's names, as a face it remaps."
   (require 'lispm-desktop-form)
   (require 'lispm-desktop-platinum-raster)
   (require 'lispm-desktop-platinum-icons)
+  (require 'lispm-desktop-popup)
   (require 'lispm-ui-base)
   (let ((names (mapcar (pcase-lambda (`(,new . ,old)) (cons new old)) lispm-ui-golden-names))
         (back (mapcar (pcase-lambda (`(,new . ,old)) (cons old new)) lispm-ui-golden-names))

@@ -218,6 +218,21 @@ above the chrome lean toward its light, those below toward its outline."
     (should (equal (lispm-ui-grey other #xFF) "#808080"))
     (should (equal (lispm-ui-grey other #x00) "#000000"))))
 
+(ert-deftest lispm-ui-test-palette-on-black ()
+  "A theme on black has a chrome its controls' dark edges and outlines
+stand out from, lifted toward its text; its content stays black, and a
+theme light enough keeps the chrome its content gives."
+  (let ((palette (lispm-ui-derive-palette "#000000" "#ffffff" "#989898" "#2fafff")))
+    (should (equal (plist-get palette :content) "#000000"))
+    (should (> (lispm-ui-luminance (plist-get palette :chrome))
+               (+ (lispm-ui-luminance (plist-get palette :outline)) 0.05)))
+    (should (> (lispm-ui-luminance (lispm-ui-grey palette #xEE))
+               (+ (lispm-ui-luminance (lispm-ui-grey palette #x00)) 0.1))))
+  (should (equal (plist-get (lispm-ui-derive-palette "#282a36" "#f8f8f2" "#6272a4" "#bd93f9") :chrome)
+                 (lispm-ui-blend "#282a36" "#000000" 0.25)))
+  ;; Colours a text terminal cannot resolve are left to it.
+  (should (equal (lispm-ui--palette-ground "unspecified-bg" "#ffffff") "unspecified-bg")))
+
 ;;;; lispm-ui-look
 
 (cl-defgeneric lispm-ui-test--drawn-by ()

@@ -17,6 +17,9 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-text.el=    | text laid out in pixels: widths, fitting with an ellipsis, aligning, breaking lines, Chinese and Japanese type          |
 | =lispm-ui-draw.el=    | what it draws with: SVG primitives, text and pictures drawn as Emacs shows them, and the cache of drawn images          |
 | =lispm-ui-controls.el= | its controls: push buttons and the default one's ring, pop-up menus, bevel buttons, radio buttons, check boxes, group boxes |
+| =lispm-ui-list.el=    | lists' column headings, the column sorted by pushed in, and disclosure triangles                                      |
+| =lispm-ui-scroll.el=  | scroll bars: where the thumb stands for what shows, and the bar drawn                                                  |
+| =lispm-ui-window.el=  | windows' title bars, laid out and drawn, as a dialog's title                                                           |
 | =lispm-ui-modal.el=   | what its modal panels share: reading events without quitting, what each key does, focus rings, holding a control pressed |
 | =lispm-ui-ask.el=     | asking a person: an alert, a question to agree to, a choice, a file                                                      |
 | =lispm-ui-form.el=    | forms, written as data                                                                                                   |

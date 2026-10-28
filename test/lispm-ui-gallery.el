@@ -22,10 +22,10 @@
 
 ;;; Commentary:
 
-;; `make gallery' draws every control LispM UI draws, in each of its
-;; states, in a light palette and a dark one, as SVG files in gallery/,
-;; and gallery/index.html showing them all, to be looked at in a browser
-;; after a change.  The tests check the drawings themselves.
+;; `make gallery' draws every control and part LispM UI draws, in each
+;; of its states, in a light palette and a dark one, as SVG files in
+;; gallery/, and gallery/index.html showing them all, to be looked at in
+;; a browser after a change.  The tests check the drawings themselves.
 ;;
 ;; A batch Emacs measures text in characters, not in the pixels of a
 ;; font, so its labels stand where a font's would not; for labels where
@@ -75,7 +75,28 @@
     ("Group boxes"
      ("top edge" . ,(lispm-ui-draw-group-edge palette 160 "Group"))
      ("bottom edge" . ,(lispm-ui-draw-group-edge palette 160 nil t))
-     ("side" . ,(lispm-ui-draw-group-side palette 18)))))
+     ("side" . ,(lispm-ui-draw-group-side palette 18)))
+    ("Lists"
+     ("headings, sorted by date" . ,(lispm-ui-draw-list-header palette '(("Name" 150 nil 28)
+                                                                         ("Date Modified" 96 t 6))))
+     ("headings, sorted by name" . ,(lispm-ui-draw-list-header palette '(("Name" 150 t 28)
+                                                                         ("Date Modified" 96 nil 6))))
+     ("triangle, closed" . ,(lispm-ui-draw-triangle palette nil))
+     ("triangle, open" . ,(lispm-ui-draw-triangle palette t)))
+    ("Scroll bars"
+     ("active" . ,(lispm-ui-draw-scroll-bar palette 141 (lispm-ui-scroll-thumb 141 2 9 0 20) t))
+     ("at the end" . ,(lispm-ui-draw-scroll-bar palette 141 (lispm-ui-scroll-thumb 141 13 20 0 20) t))
+     ("nothing to scroll" . ,(lispm-ui-draw-scroll-bar palette 141 nil t))
+     ("inactive" . ,(lispm-ui-draw-scroll-bar palette 141 (lispm-ui-scroll-thumb 141 2 9 0 20) nil)))
+    ("Title bars"
+     ,@(let ((layout (lispm-ui-title-layout 300 (lispm-ui-text-width "Choose a Picture" 'lispm-ui-title)
+                                            '(nil nil nil))))
+         `(("a dialog's" . ,(lispm-ui-draw-title-part palette 300 :active t :lead t :trail t
+                                                      :ridges (plist-get layout :ridges)
+                                                      :label "Choose a Picture"
+                                                      :label-x (plist-get layout :label-x)))
+           ("inactive" . ,(lispm-ui-draw-title-part palette 300 :label "Choose a Picture"
+                                                    :label-x (plist-get layout :label-x))))))))
 
 (defun lispm-ui-gallery-write (&optional directory)
   "Draw the gallery in DIRECTORY, by default gallery/ beside test/, or

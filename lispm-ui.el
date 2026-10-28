@@ -36,6 +36,12 @@
 ;;   lispm-ui-modal.el  what its modal panels share: reading events
 ;;                      without quitting, what each key does, focus
 ;;                      rings, holding a control pressed
+;;   lispm-ui-ask.el    asking a person: alerts, a question to agree
+;;                      to, choices, a file
+;;   lispm-ui-form.el   forms, written as data
+;;
+;; lispm-form.el keeps the names LispM's forms had before they moved
+;; here, for programs written for them.
 ;;
 ;; It knows of no desktop: an application requires it, or the part it
 ;; uses, and looks the same whether a desktop shows it or plain Emacs
@@ -47,6 +53,8 @@
 (require 'lispm-ui-base)
 (require 'lispm-ui-i18n)
 (require 'lispm-ui-modal)
+(require 'lispm-ui-ask)
+(require 'lispm-ui-form)
 
 (provide 'lispm-ui)
 ;;; lispm-ui.el ends here

@@ -6,4 +6,5 @@
 ;; the list of its forms; in the order the code writes them.
 
 (:name "English (UK)"
- :messages ())
+ :messages
+ ())

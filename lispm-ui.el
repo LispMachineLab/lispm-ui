@@ -59,6 +59,7 @@
 ;;                      to, choices, a file
 ;;   lispm-ui-popup.el  panels popped up over a frame, in child frames
 ;;   lispm-ui-alert.el  alerts, drawn
+;;   lispm-ui-menu.el   menus, drawn, and choices shown in them
 ;;   lispm-ui-form.el   forms, written as data
 ;;
 ;; lispm-form.el keeps the names LispM's forms had before they moved
@@ -84,6 +85,7 @@
 (require 'lispm-ui-controls)
 (require 'lispm-ui-popup)
 (require 'lispm-ui-alert)
+(require 'lispm-ui-menu)
 (require 'lispm-ui-form)
 
 (provide 'lispm-ui)

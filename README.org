@@ -23,10 +23,11 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-ask.el=     | asking a person: an alert, a question to agree to, a choice, a file                                                      |
 | =lispm-ui-popup.el=   | panels popped up over a frame, in child frames, holding their size                                                      |
 | =lispm-ui-alert.el=   | alerts, drawn as Mac OS 9 drew them, or in text on a text terminal                                                      |
+| =lispm-ui-menu.el=    | menus, drawn as Mac OS 9 drew them, submenus beside their items; choices shown in one                                   |
 | =lispm-ui-form.el=    | forms, written as data                                                                                                   |
 
-=lispm-ui.el= loads every part.  More come as LispM's interface moves here: menus, and a dialog
-choosing a file.
+=lispm-ui.el= loads every part.  More come as LispM's interface moves here: next, a dialog choosing
+a file.
 
 * Controls
 
@@ -94,10 +95,24 @@ LispM's forms before they moved here, which requires ~lispm-form~, finds them by
 
 ~lispm-ui-alert~, ~lispm-ui-confirm~, ~lispm-ui-choose~ and ~lispm-ui-choose-file~ ask in the
 minibuffer, never in the system's own dialogs, unless something draws them.  LispM UI draws an
-alert itself, as Mac OS 9 drew one, once it has a palette: over the selected frame, or in text on
-a text terminal whose Emacs shows child frames, as Emacs 31's does.  An interface drawing them its
+alert, and a pop-up menu's choices, itself, as Mac OS 9 drew them, once it has a palette: over the
+selected frame, or in text on a text terminal whose Emacs shows child frames, as Emacs 31's does.  An interface drawing them its
 own way sets ~lispm-ui-alert-function~, ~lispm-ui-choose-function~ or
 ~lispm-ui-choose-file-function~.
+
+* Menus
+
+~lispm-ui-menu~ pops up a menu of items, plists of =:label=, =:action=, =:enabled=, =:checked=,
+=:key=, =:icon= and =:submenu=, or the symbol =separator=, and runs the action of the one chosen;
+~lispm-ui-menu-choose~ only returns it.  The arrows, or =C-n=, =C-p=, =C-f= and =C-b=, move
+through it and its submenus, a letter goes to the item it starts, =RET= chooses and =ESC= gives up;
+where no menu can pop up, it is chosen from in the minibuffer.
+
+#+begin_src emacs-lisp
+(lispm-ui-menu `((:label "Open…" :action find-file)
+                 separator
+                 (:label "Wrap Lines" :action visual-line-mode :checked ,visual-line-mode)))
+#+end_src
 
 * The keyboard
 

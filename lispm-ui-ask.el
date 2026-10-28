@@ -39,9 +39,9 @@
 ;; dialogs, unless something draws it: `lispm-ui-alert-function',
 ;; `lispm-ui-choose-function' and `lispm-ui-choose-file-function' are
 ;; called instead when set, with the same arguments, and return what
-;; these do.  An alert is drawn by LispM UI itself, by default, once it
-;; has a palette to draw in, see lispm-ui-alert.el.  The keyboard
-;; answers each, whatever draws it.
+;; these do.  An alert, and choices, are drawn by LispM UI itself, by
+;; default, once it has a palette to draw in, see lispm-ui-alert.el and
+;; lispm-ui-menu.el.  The keyboard answers each, whatever draws it.
 
 ;;; Code:
 
@@ -130,10 +130,13 @@ asks."
 
 ;;;; Choices
 
-(defvar lispm-ui-choose-function nil
+(autoload 'lispm-ui-choose-default "lispm-ui-menu")
+
+(defvar lispm-ui-choose-function #'lispm-ui-choose-default
   "Function showing choices, as a pop-up menu does, or nil for the minibuffer.
 It is called with the arguments of `lispm-ui-choose', and returns what
-it returns.")
+it returns.  The default, `lispm-ui-choose-default', shows them in a
+menu where one can pop up, and reads them in the minibuffer elsewhere.")
 
 (defun lispm-ui-choose (choices &optional value position label)
   "Show CHOICES, a list of (VALUE . TEXT), VALUE's checked; return (VALUE)

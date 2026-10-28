@@ -18,4 +18,5 @@
   ("Picture: " . "画像：")
   ("Not a picture: %s" . "画像ではありません：%s")
   ("%s: fill this in" . "%s：入力してください")
-  ("Not a form" . "フォームではありません")))
+  ("Not a form" . "フォームではありません")
+  ("Menu: " . "メニュー：")))

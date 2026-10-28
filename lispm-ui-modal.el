@@ -194,5 +194,20 @@ With CELLS, DELTA counts a text terminal's cells, of which Emacs reads
          (> (max (abs (car delta)) (abs (cdr delta)))
             (if cells (/ fuzz 8) fuzz)))))
 
+(defconst lispm-ui-modal-areas
+  '(tab-bar tab-line header-line mode-line menu-bar tool-bar vertical-line
+    vertical-scroll-bar horizontal-scroll-bar left-fringe right-fringe
+    left-margin right-margin right-divider bottom-divider internal-border
+    child-frame-border)
+  "Symbols `read-event' returns before a mouse event over part of a frame
+or window other than text: the event follows.")
+
+(defun lispm-ui-modal-typed-p (event)
+  "Return non-nil when EVENT was typed: a character or a function key, not
+a mouse event, nor the area symbol before one, see `lispm-ui-modal-areas'.
+A panel opened from the keyboard starts on its first control."
+  (or (integerp event)
+      (and (symbolp event) event (not (memq event lispm-ui-modal-areas)))))
+
 (provide 'lispm-ui-modal)
 ;;; lispm-ui-modal.el ends here

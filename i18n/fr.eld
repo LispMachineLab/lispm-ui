@@ -18,4 +18,5 @@
   ("Picture: " . "Image : ")
   ("Not a picture: %s" . "Pas une image : %s")
   ("%s: fill this in" . "%s : à remplir")
-  ("Not a form" . "Pas un formulaire")))
+  ("Not a form" . "Pas un formulaire")
+  ("Menu: " . "Menu : ")))

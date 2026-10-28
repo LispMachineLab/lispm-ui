@@ -98,9 +98,11 @@ lit line down the bar's left end, TRAIL the shaded one down its right."
       (pcase-dolist (`(,from . ,to) ridges)
         (lispm-ui-svg-title-ridges svg from to palette)))
     (when label
+      ;; An inactive title in the muted colour its face is in: Mac OS 9's
+      ;; grey for it is lost on a dark theme's bar.
       (lispm-ui-svg-content
        svg label label-x 0 (- h 2)
-       (if active (plist-get palette :text) (lispm-ui-grey palette #x77))
+       (plist-get palette (if active :text :muted))
        (if active 'lispm-ui-title 'lispm-ui-title-inactive)))
     svg))
 

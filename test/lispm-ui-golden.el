@@ -713,7 +713,16 @@ the glyph function gives them: see `lispm-ui-golden--form'."
               (lispm-ui-draw-title-part classic 448 :active t :lead t :trail t
                                         :ridges '((7 . 150) (290 . 440)) :label "Choose a Picture"
                                         :label-x 162))
-             (lispm-ui-golden--print (lispm-ui-draw-title-part classic 200 :label "Away" :label-x 80))
+             ;; An inactive title, its face coloured as a session colours
+             ;; it: the desktop drew the title in its face's colour, which
+             ;; nothing colours in a batch Emacs.
+             (let ((was (face-attribute 'lispm-ui-title-inactive :foreground)))
+               (unwind-protect
+                   (progn (set-face-attribute 'lispm-ui-title-inactive nil
+                                              :foreground (plist-get classic :muted))
+                          (lispm-ui-golden--print
+                           (lispm-ui-draw-title-part classic 200 :label "Away" :label-x 80)))
+                 (set-face-attribute 'lispm-ui-title-inactive nil :foreground was)))
              (lispm-ui-golden--print (lispm-ui-draw-title-part dark 50 :active t :ridges '((0 . 49))))
              (lispm-ui-golden--print (lispm-ui-draw-title-part dark 16 :active t :trail t))
              (lispm-ui-golden--svg 60 21 (lambda (svg)

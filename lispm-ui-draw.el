@@ -345,11 +345,15 @@ SVG images are drawn as SVG; others are embedded as they are."
 ;; keeps the widths Emacs measures for it, so a control is as wide as its
 ;; label would be on the line.
 
+(defun lispm-ui--face-list (faces)
+  "Return FACES, a face property's value, as a list of faces."
+  (if (or (symbolp faces) (keywordp (car-safe faces))) (list faces) faces))
+
 (defun lispm-ui--face-attribute (faces attribute)
   "Return ATTRIBUTE of FACES, a face property's value, or nil.
 The first face naming it wins, as in Emacs's own merging."
   (catch 'found
-    (dolist (face (if (or (symbolp faces) (keywordp (car-safe faces))) (list faces) faces))
+    (dolist (face (lispm-ui--face-list faces))
       (let ((value (cond ((and (symbolp face) (facep face)) (face-attribute face attribute nil t))
                          ((consp face) (or (plist-get face attribute)
                                            (when-let* ((parent (plist-get face :inherit)))
@@ -362,9 +366,13 @@ The first face naming it wins, as in Emacs's own merging."
   "Draw CONTENT, a string as Emacs would show it, on SVG from X.
 Its runs are centred in the HEIGHT rows from TOP: words and icon glyphs
 in their faces layered over FACE, images as they are, stretches of space
-as wide as they say.  Text without a colour of its own is drawn in COLOR.
+as wide as they say.  Text without a colour of its own is drawn in COLOR:
+FACE, which a palette colours, gives it its font, and its colour only
+where COLOR is nil, so that a highlighted item's ink holds.  FACE on
+CONTENT itself, as to measure it, gives it no colour of its own either.
 Return the x where CONTENT ends."
-  (let ((content (copy-sequence content))
+  (let ((given content)
+        (content (copy-sequence content))
         (start 0))
     (add-face-text-property 0 (length content) face t content)
     (while (< start (length content))
@@ -385,6 +393,7 @@ Return the x where CONTENT ends."
          ((or (eq (car-safe display) 'space) (stringp display)))
          ((not (string-blank-p run))
           (let* ((faces (get-text-property 0 'face run))
+                 (own (remove face (lispm-ui--face-list (get-text-property start 'face given))))
                  (family (lispm-ui--face-attribute faces :family))
                  (base (face-attribute face :height nil t))
                  (scale (seq-reduce (lambda (size face)
@@ -397,8 +406,11 @@ Return the x where CONTENT ends."
                  (bold (memq (lispm-ui--face-attribute faces :weight)
                              '(semi-bold bold extra-bold ultra-bold heavy black)))
                  (synthetic (and bold (display-graphic-p)
-                                 (lispm-ui--synthetic-bold-p `(:family ,family))))
-                 (ink (or (lispm-ui--face-attribute faces :foreground) color))
+                                 ;; Text no face gives a family is in the
+                                 ;; default face's.
+                                 (lispm-ui--synthetic-bold-p (if family (list :family family) 'default))))
+                 (ink (or (lispm-ui--face-attribute own :foreground) color
+                          (lispm-ui--face-attribute faces :foreground)))
                  (lines (delq nil (list (and (lispm-ui--face-attribute faces :underline) "underline")
                                         (and (lispm-ui--face-attribute faces :strike-through)
                                              "line-through")))))

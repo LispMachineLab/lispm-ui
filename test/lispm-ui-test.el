@@ -2728,6 +2728,25 @@ its title, headings, items and buttons on it."
           (should (string-search word text)))
         (should-not (string-search "notes.txt" text))))))
 
+(ert-deftest lispm-ui-test-file-dialog-ink ()
+  "The selected row's name is drawn in the dialog's ink for it, on the
+outline, the others' in the text colour, though a palette colours the
+face their names are measured in."
+  (lispm-ui-test--keeping-faces '(lispm-ui-list)
+    (set-face-attribute 'lispm-ui-list nil :foreground "#123456")
+    (let* ((palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+           (lispm-ui-current-palette palette)
+           (lispm-ui-choose-recent nil)
+           (dialog (lispm-ui-file-dialog--make-dialog
+                    :title "Choose a Picture" :directory "/Pictures/Holidays/"
+                    :items `(("albums" "/Pictures/Holidays/albums" t ,(current-time))
+                             ("ada.png" "/Pictures/Holidays/ada.png" nil ,(current-time)))
+                    :selected 1))
+           (fills (lispm-ui-test--text-fills (lispm-ui-file-dialog-draw dialog palette))))
+      (should-not (equal (lispm-ui-grey palette #xFF) (plist-get palette :text)))
+      (should (equal (alist-get "ada.png" fills nil nil #'equal) (lispm-ui-grey palette #xFF)))
+      (should (equal (alist-get "albums" fills nil nil #'equal) (plist-get palette :text))))))
+
 (ert-deftest lispm-ui-test-file-dialog-fallback ()
   "Where no dialog can be drawn, the file is read in the minibuffer, never
 in the system's own panel, among the files the dialog would list."

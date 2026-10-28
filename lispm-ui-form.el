@@ -198,8 +198,11 @@ this is nil.")
   "Face of the help under a field of a form."
   :group 'lispm-ui)
 
-(defface lispm-ui-form-area '((t :inherit widget-field :box nil :extend nil))
-  "Face of a text area of a form, a panel of several lines."
+(defface lispm-ui-form-area '((t :inherit widget-field :box nil :extend nil
+                                 :underline nil :overline nil :strike-through nil))
+  "Face of a text area of a form, a panel of several lines: a text field's
+colours, none of the lines a theme draws about one, which would rule each
+of its lines."
   :group 'lispm-ui)
 
 (defface lispm-ui-form-area-edge '((t :background "gray55"))

@@ -11,6 +11,7 @@
   ("OK" . "OK")
   ("Choose a File" . "ファイルを選択")
   ("%s:" . "%s：")
+  ("TAB goes to the next field · changes take effect at once · C-c C-c closes" . "TAB：次の項目 · 変更はすぐに反映 · C-c C-c：閉じる")
   ("TAB goes to the next field · C-c C-c %s · C-c C-k cancels" . "TAB：次の項目 · C-c C-c：%s · C-c C-k：キャンセル")
   ("Choose…" . "選択…")
   ("No picture" . "画像なし")

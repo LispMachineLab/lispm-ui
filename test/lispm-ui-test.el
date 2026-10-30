@@ -2927,5 +2927,66 @@ saying its language changed, unless `lispm-ui-language' chooses one."
 holds no longer.  Run with `make i18n'."
   (lispm-kit-i18n-report 'lispm-ui (lispm-ui-test--messages)))
 
+(ert-deftest lispm-ui-test-tabs-text-wrap-width-and-actions ()
+  "Narrow text rows preserve each tab action, order and selected face."
+  (let ((lispm-ui-current-palette '(:muted "grey")) activated)
+    (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) t)))
+      (let* ((tabs (mapcar (lambda (label)
+                            (list label (equal label "Work")
+                                  'button (make-symbol "tab") 'category 'default-button
+                                  'keymap button-map 'lispm-ui-label label
+                                  'action (lambda (_) (setq activated label))))
+                          '("Work" "Mailbox" "Character")))
+             (original (copy-tree tabs))
+             (text (lispm-ui-tabs tabs 15)))
+        (should (equal original tabs))
+        (should (= (lispm-ui-tabs-width '("Work" "Mailbox" "Character")) 30))
+        (should (= (length (split-string text "\n")) 2))
+        (dolist (row (split-string text "\n")) (should (= (string-width row) 15)))
+        (with-temp-buffer
+          (insert text)
+          (goto-char (point-min))
+          (let ((position (text-property-any (point-min) (point-max) 'lispm-ui-label "Character")))
+            ;; `text-property-any' uses eq: labels above are retained verbatim.
+            (unless position
+              (setq position (text-property-search-forward 'lispm-ui-label "Character" #'equal))
+              (setq position (prop-match-beginning position)))
+            (push-button position)
+            (should (equal activated "Character"))))))))
+
+(ert-deftest lispm-ui-test-tabs-graphical-width-and-properties ()
+  "Graphical rows fit their requested width without losing hit targets."
+  (let (drawn)
+    (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) nil))
+              ((symbol-function 'lispm-ui-text-width) (lambda (text &optional _) (* 7 (length text))))
+              ((symbol-function 'lispm-ui-text-fit)
+               (lambda (text width &optional _) (substring text 0 (min (length text) (/ width 7)))))
+              ((symbol-function 'lispm-ui-image) (lambda (_key draw) (funcall draw)))
+              ((symbol-function 'lispm-ui-draw-tab)
+               (lambda (_palette label width &rest _) (push label drawn) (list 'tab width)))
+              ((symbol-function 'lispm-ui-draw-tab-edge)
+               (lambda (_palette width) (list 'edge width))))
+      (let ((row (lispm-ui-tabs '(("Work" t lispm-ui-label work)
+                                  ("Mailbox" nil lispm-ui-label mailbox)
+                                  ("Character" nil lispm-ui-label character)) 110)))
+        (should (= (length drawn) 3))
+        (should (= (length (split-string row "\n")) 2))
+        (dolist (line (split-string row "\n"))
+          (let ((sum 0))
+            (dotimes (position (length line))
+              (cl-incf sum (cadr (get-text-property position 'display line))))
+            (should (= sum 110))))
+        (dolist (label '(work mailbox character))
+          (should (text-property-any 0 (length row) 'lispm-ui-label label row)))))))
+
+(ert-deftest lispm-ui-test-tabs-drawing-and-empty-row ()
+  "Tabs draw the pane edge with both active and inactive geometry."
+  (let ((palette (lispm-ui-derive-palette "#cccccc" "#000000" "#777777" "#0000ff")))
+    (dolist (active '(nil t))
+      (let ((svg (lispm-ui-draw-tab palette "Work" 80 :front active)))
+        (should (= (dom-attr svg 'width) 80))
+        (should (= (dom-attr svg 'height) 24))))
+    (should (equal (lispm-ui-tabs nil 100) ""))))
+
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

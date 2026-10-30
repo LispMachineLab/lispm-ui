@@ -18,7 +18,7 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-draw.el=    | what it draws with: SVG primitives, text and pictures drawn as Emacs shows them, and the cache of drawn images          |
 | =lispm-ui-raster.el=  | pictures drawn in text, in block characters, and as PNGs, for text terminals                                            |
 | =lispm-ui-icons.el=   | icons found by name: an interface's own, through a hook, and those its alerts and file dialog show                      |
-| =lispm-ui-controls.el= | its controls: push buttons and the default one's ring, pop-up menus, bevel buttons, radio buttons, check boxes, group boxes |
+| =lispm-ui-controls.el= | its controls: push buttons and the default one's ring, pop-up menus, bevel buttons, radio buttons, check boxes, group boxes and tabs |
 | =lispm-ui-list.el=    | lists' column headings, the column sorted by pushed in, and disclosure triangles                                      |
 | =lispm-ui-scroll.el=  | scroll bars: where the thumb stands for what shows, and the bar drawn                                                  |
 | =lispm-ui-window.el=  | windows' title bars, laid out and drawn, as a dialog's title                                                           |
@@ -47,6 +47,23 @@ terminal shows as text; and as a button inserted in a buffer, as ~lispm-ui-inser
 =TAB= and =S-TAB= go from one to the next, as buttons do; the one point is on is drawn ringed when
 ~lispm-ui-show-focus~ runs from ~post-command-hook~, and =RET= or =SPC= presses it, drawn pushed in
 as it is.
+
+A tab row uses =lispm-ui-tabs= with =(LABEL FRONT . PROPERTIES)= entries.
+=FRONT= selects the active pane; the text properties carry the application's
+button action or header-line keymap. Widths are pixels in graphical frames and
+cells in terminals. =lispm-ui-tabs-width= returns the natural row width; long
+labels shorten and narrow panes wrap whole tabs. The drawing generics
+=lispm-ui-draw-tab= and =lispm-ui-draw-tab-edge= support other looks.
+
+#+begin_src emacs-lisp
+(insert
+ (lispm-ui-tabs
+  `(("Work" t button t category default-button keymap ,button-map
+     action ,(lambda (_) (message "Work selected")))
+    ("Mailbox" nil button t category default-button keymap ,button-map
+     action ,(lambda (_) (message "Mailbox selected"))))
+  (window-body-width nil (not (lispm-ui-tty-p)))))
+#+end_src
 
 * Colours and looks
 

@@ -808,7 +808,7 @@ including the pane edge before and between tabs.  FACE defaults to
 (defun lispm-ui--tab-edge (width)
   "Return the graphical pane edge WIDTH pixels wide as a display string."
   (propertize " " 'display
-              (lispm-ui-image
+              (lispm-ui-look-image
                (list 'tabs-edge width)
                (lambda () (lispm-ui-draw-tab-edge lispm-ui-current-palette width)))))
 
@@ -865,7 +865,7 @@ Return new strings without changing the input or its properties."
           (seq-mapn
            (pcase-lambda (`(,_ ,front . ,properties) label)
              (let* ((tab-width (+ padding (lispm-ui-text-width label face)))
-                    (image (lispm-ui-image
+                    (image (lispm-ui-look-image
                             (list 'tabs-tab (lispm-ui-content-key label) front face tab-width)
                             (lambda ()
                               (lispm-ui-draw-tab lispm-ui-current-palette label tab-width

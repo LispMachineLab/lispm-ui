@@ -36,6 +36,14 @@
 (require 'lispm-ui)
 (require 'lispm-kit-i18n-check)
 
+;; Stubbing a subr with `cl-letf' makes Emacs install a trampoline for that
+;; subr to be called from compiled code, which takes seconds the first time
+;; in a process for each subr.  The tests stub subrs, and what they stub is
+;; called from Emacs Lisp, which reads the stubs.
+(setq native-comp-enable-subr-trampolines nil)
+(when (boundp 'comp-enable-subr-trampolines)
+  (setq comp-enable-subr-trampolines nil))
+
 (defconst lispm-ui-test--directory
   (file-name-directory (directory-file-name (file-name-directory (or load-file-name buffer-file-name))))
   "The directory of LispM UI's sources.")
@@ -1254,6 +1262,182 @@ drawing functions draw their pixels as rectangles."
                      (<= y0 (+ y 0.5) (+ y0 (dom-attr node 'height))))
             (setq color (upcase fill))))))
     color))
+
+;;;; lispm-ui-field
+
+(defmacro lispm-ui-test--fields (&rest body)
+  "Run BODY with a window's frame, ASKING, drawn inside another, and with
+its field, FIELD, made: neither is a frame Emacs made, and FRAME's
+minibuffer is FIELD's window once it has one.  `made' holds what
+`make-frame' was given, `height' FIELD's pixel height, `placed' where
+FIELD was put last, and `visible' whether it shows."
+  (declare (indent 0))
+  `(let ((lispm-ui-field--fields nil)
+         (lispm-ui-field--before nil)
+         (lispm-ui-field--echo-timer nil)
+         (parameters '((asking . ((minibuffer . shared-mini)))))
+         (height 15)
+         (placed nil)
+         (visible nil)
+         (made nil)
+         ;; Cleanup such as killing a buffer asks whether Emacs's own
+         ;; windows are live; let it see them as Emacs does.
+         (real-window-live-p (symbol-function 'window-live-p)))
+     (cl-letf (((symbol-function 'make-frame)
+                (lambda (params) (push params made) 'field))
+               ((symbol-function 'frame-live-p)
+                (lambda (frame) (and (memq frame '(asking field)) t)))
+               ((symbol-function 'frame-parameter)
+                (lambda (frame parameter)
+                  (alist-get parameter (alist-get frame parameters))))
+               ((symbol-function 'set-frame-parameter)
+                (lambda (frame parameter value)
+                  (setf (alist-get parameter (alist-get frame parameters)) value)))
+               ((symbol-function 'modify-frame-parameters)
+                (lambda (frame params)
+                  (dolist (param params)
+                    (setf (alist-get (car param) (alist-get frame parameters))
+                          (cdr param)))))
+               ((symbol-function 'frame-parent) (lambda (&rest _) 'asking))
+               ((symbol-function 'frame-text-width) (lambda (&rest _) 402))
+               ((symbol-function 'frame-char-height) (lambda (&rest _) 15))
+               ((symbol-function 'frame-pixel-height)
+                (lambda (frame) (if (eq frame 'field) height 300)))
+               ((symbol-function 'minibuffer-window)
+                (lambda (&optional frame)
+                  (pcase (or frame 'asking)
+                    ('field 'field-mini)
+                    (asked (or (alist-get 'minibuffer (alist-get asked parameters))
+                               'shared-mini)))))
+               ((symbol-function 'window-frame)
+                (lambda (window) (if (eq window 'field-mini) 'field 'asking)))
+               ((symbol-function 'window-live-p)
+                (lambda (window)
+                  (or (eq window 'field-mini) (funcall real-window-live-p window))))
+               ((symbol-function 'window-text-pixel-size) (lambda (&rest _) (cons 100 45)))
+               ((symbol-function 'active-minibuffer-window) (lambda () nil))
+               ((symbol-function 'selected-frame) (lambda () 'asking))
+               ((symbol-function 'frame-visible-p) (lambda (&rest _) visible))
+               ((symbol-function 'make-frame-visible) (lambda (&rest _) (setq visible t)))
+               ((symbol-function 'make-frame-invisible) (lambda (&rest _) (setq visible nil)))
+               ((symbol-function 'set-frame-width) (lambda (&rest _) nil))
+               ((symbol-function 'set-frame-height)
+                (lambda (frame value &rest _)
+                  (when (eq frame 'field) (setq height value))))
+               ((symbol-function 'set-frame-position)
+                (lambda (frame x y) (when (eq frame 'field) (setq placed (list x y)))))
+               ((symbol-function 'delete-frame) (lambda (&rest _) nil)))
+       ,@body)))
+
+(ert-deftest lispm-ui-test-field-is-a-child-frame-at-the-bottom ()
+  "A frame drawn inside another reads from a field: a hidden,
+minibuffer-only child frame of its own, as wide as it, which the frame
+takes as its minibuffer window and which is kept as tall as what it
+shows, at the frame's bottom; made twice, a frame has one field."
+  (lispm-ui-test--fields
+    (should-not (lispm-ui-field 'asking))
+    (should (eq (lispm-ui-field-make 'asking) 'field))
+    (should (= (length made) 1))
+    (let ((params (car made)))
+      (should (eq (alist-get 'parent-frame params) 'asking))
+      (should (eq (alist-get 'minibuffer params) 'only))
+      (should (eq (alist-get 'visibility params) nil))
+      (should (equal (alist-get 'width params) '(text-pixels . 402))))
+    (should (eq (lispm-ui-field 'asking) 'field))
+    (should (lispm-ui-field-p 'field))
+    (should-not (lispm-ui-field-p 'asking))
+    ;; What it shows is 45 pixels: the field is that tall, at the bottom of
+    ;; its frame.
+    (should (= height 45))
+    (should (equal placed '(0 255)))
+    (should (eq (lispm-ui-field-make 'asking) 'field))
+    (should (= (length made) 1))))
+
+(ert-deftest lispm-ui-test-field-shows-and-hides ()
+  "A field shows, as tall as what is read from it, and hides again; it is
+never taller than `lispm-ui-field-max-lines', nor than the frame it is
+under."
+  (lispm-ui-test--fields
+    (lispm-ui-field-make 'asking)
+    (should-not visible)
+    (lispm-ui-field-show 'asking)
+    (should visible)
+    (let ((lispm-ui-field-max-lines 2))
+      (lispm-ui-field-show 'asking 5)
+      (should (= height 30)))
+    (lispm-ui-field-hide 'asking)
+    (should-not visible)))
+
+(ert-deftest lispm-ui-test-field-disposes ()
+  "Disposed of, a field's frame is deleted and the frame it was the
+minibuffer of reads from where it read before."
+  (lispm-ui-test--fields
+    (lispm-ui-field-make 'asking)
+    (should (eq (frame-parameter 'asking 'minibuffer) 'field-mini))
+    (lispm-ui-field-dispose 'asking)
+    (should-not (lispm-ui-field 'asking))
+    (should-not (lispm-ui-field-p 'field))
+    (should (eq (frame-parameter 'asking 'minibuffer) 'shared-mini))
+    (should-not (assq 'asking lispm-ui-field--before))))
+
+(ert-deftest lispm-ui-test-field-takes-no-frame-with-a-minibuffer-of-its-own ()
+  "A frame showing a minibuffer of its own cannot read in a field: Emacs
+cannot change it, so no field is made and none is left behind."
+  (lispm-ui-test--fields
+    (setf (alist-get 'minibuffer (alist-get 'asking parameters)) nil)
+    (cl-letf (((symbol-function 'minibuffer-window)
+               (lambda (&optional _) 'asking-mini))
+              ((symbol-function 'window-frame)
+               (lambda (window) (if (eq window 'asking-mini) 'asking 'field))))
+      (should-error (lispm-ui-field-make 'asking) :type 'user-error))
+    (should-not made)
+    (should-not (lispm-ui-field 'asking))))
+
+(ert-deftest lispm-ui-test-field-echoes-a-message ()
+  "A message meant for a frame with a field shows in it for
+`lispm-ui-field-echo-seconds', a field as tall as the message's lines; a
+frame without one shows its message as Emacs does, and so the function
+returns nil either way, for Emacs to show it."
+  (lispm-ui-test--fields
+    (should-not (lispm-ui-field-echo "Nothing asks"))
+    (should-not visible)
+    (lispm-ui-field-make 'asking)
+    (should-not (lispm-ui-field-echo "Your move?"))
+    (should visible)
+    (should (= height 15))
+    (should (timerp lispm-ui-field--echo-timer))
+    (cancel-timer lispm-ui-field--echo-timer)
+    (setq lispm-ui-field--echo-timer nil)
+    (should-not (lispm-ui-field-echo "One\ntwo\nthree"))
+    (should (= height 45))))
+
+(ert-deftest lispm-ui-test-field-setup ()
+  "What is read from a frame with a field shows in that field, as tall as
+what it shows, and is kept so as what it shows changes."
+  (lispm-ui-test--fields
+    (lispm-ui-field-make 'asking)
+    (with-temp-buffer
+      (lispm-ui-field-setup))
+    (should visible)
+    (should (= height 45))))
+
+(ert-deftest lispm-ui-test-field-arranges-messages-and-reads ()
+  "Turned on, messages and what is read are shown in fields; turned off,
+they are Emacs's again."
+  (let ((set-message-functions nil)
+        (minibuffer-setup-hook nil)
+        (minibuffer-exit-hook nil))
+    (lispm-ui-field-enable)
+    (lispm-ui-field-enable)
+    (should (eq (car set-message-functions) #'lispm-ui-field-echo))
+    (should (= (length set-message-functions) 1))
+    (should (memq #'lispm-ui-field-setup minibuffer-setup-hook))
+    (should (memq #'lispm-ui-field-exit minibuffer-exit-hook))
+    (should (= (length minibuffer-setup-hook) 1))
+    (lispm-ui-field-disable)
+    (should-not set-message-functions)
+    (should-not minibuffer-setup-hook)
+    (should-not minibuffer-exit-hook)))
 
 ;;;; lispm-ui-menu
 

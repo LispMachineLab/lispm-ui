@@ -4,7 +4,7 @@
 
 ;; Author: Ryan.K
 ;; URL: https://github.com/LispMachineLab/lispm-ui
-;; Version: 0.6.0
+;; Version: 0.7.0
 ;; Package-Requires: ((emacs "30.1") (lispm-kit "0.2.0"))
 ;; Keywords: convenience, faces, mouse
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
@@ -61,6 +61,8 @@
 ;;   lispm-ui-ask.el    asking a person: alerts, a question to agree
 ;;                      to, choices, a file
 ;;   lispm-ui-popup.el  panels popped up over a frame, in child frames
+;;   lispm-ui-field.el  the minibuffer of a window drawn inside another,
+;;                      a field at the bottom of the window
 ;;   lispm-ui-alert.el  alerts, drawn
 ;;   lispm-ui-menu.el   menus, drawn, and choices shown in them
 ;;   lispm-ui-file-dialog.el
@@ -92,6 +94,7 @@
 (require 'lispm-ui-scroll)
 (require 'lispm-ui-window)
 (require 'lispm-ui-popup)
+(require 'lispm-ui-field)
 (require 'lispm-ui-alert)
 (require 'lispm-ui-menu)
 (require 'lispm-ui-file-dialog)

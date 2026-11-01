@@ -1279,7 +1279,10 @@ FIELD was put last, and `visible' whether it shows."
          (height 15)
          (placed nil)
          (visible nil)
-         (made nil))
+         (made nil)
+         ;; Cleanup such as killing a buffer asks whether Emacs's own
+         ;; windows are live; let it see them as Emacs does.
+         (real-window-live-p (symbol-function 'window-live-p)))
      (cl-letf (((symbol-function 'make-frame)
                 (lambda (params) (push params made) 'field))
                ((symbol-function 'frame-live-p)
@@ -1308,7 +1311,9 @@ FIELD was put last, and `visible' whether it shows."
                                'shared-mini)))))
                ((symbol-function 'window-frame)
                 (lambda (window) (if (eq window 'field-mini) 'field 'asking)))
-               ((symbol-function 'window-live-p) (lambda (window) (eq window 'field-mini)))
+               ((symbol-function 'window-live-p)
+                (lambda (window)
+                  (or (eq window 'field-mini) (funcall real-window-live-p window))))
                ((symbol-function 'window-text-pixel-size) (lambda (&rest _) (cons 100 45)))
                ((symbol-function 'active-minibuffer-window) (lambda () nil))
                ((symbol-function 'selected-frame) (lambda () 'asking))

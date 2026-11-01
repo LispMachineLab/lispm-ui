@@ -25,6 +25,7 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-modal.el=   | what its modal panels share: reading events without quitting, what each key does, focus rings, holding a control pressed |
 | =lispm-ui-ask.el=     | asking a person: an alert, a question to agree to, a choice, a file                                                      |
 | =lispm-ui-popup.el=   | panels popped up over a frame, in child frames, holding their size                                                      |
+| =lispm-ui-field.el=   | the minibuffer of a window drawn inside another, a field at the bottom of the window                                    |
 | =lispm-ui-alert.el=   | alerts, drawn as Mac OS 9 drew them, or in text on a text terminal                                                      |
 | =lispm-ui-menu.el=    | menus, drawn as Mac OS 9 drew them, submenus beside their items; choices shown in one                                   |
 | =lispm-ui-file-dialog.el= | the dialog choosing a file: a folder's list, the usual places, the files chosen lately, a picture's preview       |

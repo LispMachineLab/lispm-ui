@@ -3209,5 +3209,79 @@ holds no longer.  Run with `make i18n'."
         (should (= (dom-attr svg 'height) 24))))
     (should (equal (lispm-ui-tabs nil 100) ""))))
 
+(ert-deftest lispm-ui-test-file-dialog-directory-only ()
+  "When `:predicate' is `file-directory-p', the file dialog chooses the
+selected folder or the current folder, while right-arrow or double-click
+still enters a folder."
+  (lispm-ui-test--with-pictures
+    (lispm-ui-test--with-file-dialog-keys
+      (cl-flet ((choose (events)
+                  (let ((unread-command-events events))
+                    (lispm-ui-file-dialog :directory folder
+                                          :predicate #'file-directory-p))))
+        ;; Return chooses the selected folder (albums).
+        (should (equal (choose '(return))
+                       (file-name-as-directory (expand-file-name "albums" folder))))
+        ;; C-f enters albums, then Return chooses albums itself (since it has no subfolders).
+        (should (equal (choose '(?\C-f return))
+                       (file-name-as-directory (expand-file-name "albums" folder))))))))
+
+(ert-deftest lispm-ui-test-gui-vs-keyboard-interception ()
+  "GUI-initiated actions route prompts to LispM UI's alert, menu, form and
+file dialogs, whereas native keyboard commands are not intercepted."
+  (let ((lispm-ui-intercept-in-tests t)
+        (lispm-ui-current-palette (lispm-ui-test--classic-palette))
+        (calls nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'lispm-ui-popup-available-p) (lambda () t))
+                  ((symbol-function 'lispm-ui-popup-graphic-p) (lambda () t))
+                  ((symbol-function 'lispm-ui-alert)
+                   (lambda (icon message buttons &optional _detail)
+                     (push (list 'alert icon message) calls)
+                     (nth 1 (seq-find (lambda (b) (eq (nth 2 b) 'default)) buttons))))
+                  ((symbol-function 'lispm-ui-choose)
+                   (lambda (choices &optional value _pos label)
+                     (push (list 'choose label (mapcar #'car choices) value) calls)
+                     (list (caar choices))))
+                  ((symbol-function 'lispm-ui-choose-file)
+                   (lambda (&rest args)
+                     (push (cons 'file args) calls)
+                     "/tmp/chosen"))
+                  ((symbol-function 'lispm-ui-form-prompt)
+                   (lambda (prompt &rest args)
+                     (push (cl-list* 'form prompt args) calls)
+                     (or (plist-get args :initial)
+                         (plist-get args :default)
+                         "typed-in-form"))))
+          (lispm-ui-intercept-enable)
+          ;; 1. GUI action (lispm-ui-in-gui-action = t) is intercepted:
+          (let ((lispm-ui-in-gui-action t))
+            (should (eq (y-or-n-p "Clear the console? ") t))
+            (should (equal (car calls) '(alert caution "Clear the console?")))
+            (should (equal (read-string "Model ID: " "gpt-5") "gpt-5"))
+            (should (equal (car calls) '(form "Model ID: " :initial "gpt-5" :default nil)))
+            (should (equal (read-passwd "API Key: ") "typed-in-form"))
+            (should (equal (car calls) '(form "API Key: " :default nil :password t)))
+            (should (= (read-number "Port: " 8080) 8080))
+            (should (equal (completing-read "Source: " '("LispM" "Emacs") nil t) "LispM"))
+            (should (equal (car calls) '(choose "Source" ("LispM" "Emacs") nil)))
+            (should (equal (completing-read "Branch: " '("main" "dev") nil nil "feat") "feat"))
+            (should (eq (car (car calls)) 'form))
+            (should (equal (read-directory-name "Folder: " "/tmp/") "/tmp/chosen"))
+            (should (equal (car calls) '(file :title "Folder" :directory "/tmp/" :predicate file-directory-p)))
+            (should (equal (read-file-name "Save: " nil nil nil "~/Console.txt") "~/Console.txt"))
+            (should (equal (car calls) '(form "Save" :initial "~/Console.txt" :default nil))))
+          ;; 2. Native keyboard operation (lispm-ui-in-gui-action = nil, key event) is NOT intercepted:
+          (setq calls nil)
+          (let ((lispm-ui-in-gui-action nil)
+                (lispm-ui--command-from-mouse nil)
+                (last-input-event ?x)
+                (last-command-event ?x))
+            (should-not (lispm-ui-gui-action-p))
+            ;; Field echo runs for keyboard, skipped for GUI:
+            (let ((lispm-ui-in-gui-action t))
+              (should (lispm-ui-gui-action-p)))))
+      (lispm-ui-intercept-disable))))
+
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

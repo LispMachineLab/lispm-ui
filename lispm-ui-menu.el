@@ -568,7 +568,8 @@ A menu the action pops up is its own, not a step of a menu bar walk."
   (when-let* ((action (and item (plist-get item :action))))
     (let ((lispm-ui-menu-bar-step nil)
           (lispm-ui-menu-small nil)
-          (lispm-ui-menu-parent nil))
+          (lispm-ui-menu-parent nil)
+          (lispm-ui-in-gui-action t))
       (if (commandp action) (call-interactively action) (funcall action))))
   item)
 

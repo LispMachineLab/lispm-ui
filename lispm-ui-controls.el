@@ -991,7 +991,9 @@ describes it.  KEYMAP, by default button.el's, is the control's."
                        'lispm-ui-focused (funcall images t nil)
                        'lispm-ui-pressed (funcall images nil 'pressed))
            (if label (concat " " label) ""))
-   'action (lambda (_) (funcall action))
+   'action (lambda (_)
+             (let ((lispm-ui-in-gui-action t))
+               (funcall action)))
    'face 'default 'follow-link t 'help-echo help
    'keymap (or keymap button-map)))
 
@@ -1041,7 +1043,9 @@ Space and the mouse open it, as they press a push button."
                       'lispm-ui-pressed (lispm-ui-image-of
                                          (lispm-ui-push-button
                                           label :default default :state 'pressed))
-                      'action (lambda (_) (funcall action))
+                      'action (lambda (_)
+                                (let ((lispm-ui-in-gui-action t))
+                                  (funcall action)))
                       'lispm-ui-label label
                       'face nil 'keymap lispm-ui-push-button-map
                       'help-echo (or help label)))

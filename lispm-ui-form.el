@@ -160,6 +160,7 @@
 (require 'lispm-ui-base)
 (require 'lispm-ui-i18n)
 (require 'lispm-ui-palette)
+(require 'lispm-ui-popup)
 (require 'lispm-ui-draw)
 (require 'lispm-ui-controls)
 
@@ -436,7 +437,8 @@ not while the text of a field is being changed."
     (setf (alist-get key lispm-ui-form--values) value)
     (unwind-protect
         (when-let* ((on-change (plist-get (cdr (assq key lispm-ui-form--fields)) :on-change)))
-          (let ((lispm-ui-form--changing buffer))
+          (let ((lispm-ui-form--changing buffer)
+                (lispm-ui-in-gui-action t))
             (funcall on-change value)))
       ;; Shown as it now is, whatever :on-change refused.
       (when (buffer-live-p buffer)
@@ -613,7 +615,9 @@ Where pictures cannot be shown, the control is drawn as text anyway."
                  :tag label
                  :tag-glyph (lispm-ui-form--glyph 'button (and default 'default) label)
                  :lispm-form-control (list 'button (and default 'default) label)
-                 :notify (lambda (&rest _) (funcall action))))
+                 :notify (lambda (&rest _)
+                           (let ((lispm-ui-in-gui-action t))
+                             (funcall action)))))
 
 (defun lispm-ui-form--button-width (label default)
   "Pixels the push button LABEL takes, DEFAULT if it is the default one."
@@ -764,7 +768,9 @@ one; of a form applying its changes at once, the one closing it, if any."
                                     :format "%v"
                                     :value (or value "")
                                     :lispm-form-width (plist-get props :width)
-                                    :action (lambda (&rest _) (widget-forward 1))
+                                    :action (if (plist-get props :submit)
+                                                (lambda (&rest _) (lispm-ui-form-submit))
+                                              (lambda (&rest _) (widget-forward 1)))
                                     :notify (lambda (widget &optional _child event)
                                               ;; Told once it is changed, not before too.
                                               (unless (eq (car-safe event) 'before-change)
@@ -1247,13 +1253,18 @@ right edge."
               (push pad pads))))
         (widget-put widget :lispm-form-pads pads)))))
 
-(defun lispm-ui-form-choose (label choices _value event)
+(defun lispm-ui-form-choose (label choices value event)
   "Show CHOICES, a list of (VALUE . TEXT), as LABEL's; return (VALUE) chosen.
-A menu for EVENT, if it is the mouse's, else Emacs's own way for the
+A menu for EVENT, if one can pop up, else Emacs's own way for the
 keyboard (see `widget-choose')."
-  (widget-choose label
-                 (mapcar (lambda (choice) (cons (cdr choice) (list (car choice)))) choices)
-                 event))
+  (if (lispm-ui-popup-available-p)
+      (lispm-ui-choose choices value
+                       (or (and (mouse-event-p event) (posn-point (event-start event)))
+                           (point))
+                       label)
+    (widget-choose label
+                   (mapcar (lambda (choice) (cons (cdr choice) (list (car choice)))) choices)
+                   event)))
 
 (defun lispm-ui-form-redraw ()
   "Draw the form in this buffer again, as it is, point staying where it was;
@@ -1559,7 +1570,8 @@ from `lispm-ui-form-drawn-hook', and from an application's like it."
     (when-let* ((widget (alist-get (car field) lispm-ui-form--widgets)))
       (goto-char (or (widget-field-start widget) (widget-get widget :from))))
     (user-error "%s" (lispm-ui-form--problem field)))
-  (let ((buffer (current-buffer)))
+  (let ((buffer (current-buffer))
+        (lispm-ui-in-gui-action t))
     (when-let* ((on-submit (plist-get lispm-ui-form--props :on-submit)))
       (funcall on-submit (lispm-ui-form-values)))
     (lispm-ui-form--close buffer)))
@@ -1567,7 +1579,8 @@ from `lispm-ui-form-drawn-hook', and from an application's like it."
 (defun lispm-ui-form-cancel ()
   "Cancel the form in this buffer."
   (interactive)
-  (let ((buffer (current-buffer)))
+  (let ((buffer (current-buffer))
+        (lispm-ui-in-gui-action t))
     (when-let* ((on-cancel (plist-get lispm-ui-form--props :on-cancel)))
       (funcall on-cancel))
     (lispm-ui-form--close buffer)))
@@ -1584,6 +1597,155 @@ from `lispm-ui-form-drawn-hook', and from an application's like it."
         (kill-buffer buffer))
        (t
         (quit-window t window))))))
+
+;;;; Modal prompt forms
+
+(defvar lispm-ui-form-modal-show-function #'lispm-ui-form--modal-show-default
+  "Function showing a modal form's buffer and returning a cleanup function.
+Called with BUFFER, it displays BUFFER in a selected window or frame and
+returns a function of no arguments that closes it when the prompt ends.")
+
+(defvar lispm-ui-form-prompt-function nil
+  "Optional function overriding `lispm-ui-form-prompt'.
+When non-nil, called with (PROMPT &key INITIAL DEFAULT PASSWORD CHOICES
+REQUIRE-MATCH VALIDATE).")
+
+(defun lispm-ui-form--modal-show-default (buffer)
+  "Show modal form BUFFER in a child frame or window; return a cleanup function."
+  (if (and (not noninteractive)
+           (or (display-graphic-p) (featurep 'tty-child-frames)))
+      (let* ((parent (selected-frame))
+             (geom (lispm-ui-form-geometry buffer))
+             (outer (or (plist-get geom :outer) 420))
+             (width (+ outer 40))
+             (height (with-current-buffer buffer
+                       (let ((truncate-lines t))
+                         (+ (cdr (buffer-text-pixel-size buffer nil t)) 40))))
+             (frame (let ((after-make-frame-functions nil)
+                          (before-make-frame-hook nil))
+                      (make-frame
+                       `((parent-frame . ,parent)
+                         (minibuffer . nil)
+                         (undecorated . ,(not (lispm-ui-tty-p parent)))
+                         (unsplittable . t) (no-other-frame . t)
+                         (child-frame-border-width . 1) (internal-border-width . 0)
+                         (left-fringe . 0) (right-fringe . 0)
+                         (vertical-scroll-bars . nil) (horizontal-scroll-bars . nil)
+                         (menu-bar-lines . 0) (tool-bar-lines . 0) (tab-bar-lines . 0)
+                         (desktop-dont-save . t) (visibility . nil)
+                         (background-color . ,(or (lispm-ui-color :chrome)
+                                                  (frame-parameter parent 'background-color)))
+                         (foreground-color . ,(or (lispm-ui-color :text)
+                                                  (frame-parameter parent 'foreground-color)))
+                         (width . 50) (height . 10)))))
+             (root (frame-root-window frame)))
+        (set-window-buffer root buffer)
+        (set-window-dedicated-p root t)
+        (set-window-fringes root 0 0)
+        (let ((frame-resize-pixelwise t))
+          (set-frame-size frame width (max 140 height) t))
+        (set-frame-position frame
+                            (max 0 (/ (- (frame-pixel-width parent) width) 2))
+                            (max 0 (/ (- (frame-pixel-height parent) height) 3)))
+        (make-frame-visible frame)
+        (select-frame-set-input-focus frame)
+        (select-window root)
+        (lambda ()
+          (when (frame-live-p frame)
+            (delete-frame frame t))
+          (when (frame-live-p parent)
+            (select-frame-set-input-focus parent))))
+    (let ((config (current-window-configuration)))
+      (pop-to-buffer buffer)
+      (lambda ()
+        (when (window-configuration-p config)
+          (set-window-configuration config))))))
+
+(cl-defun lispm-ui-form-prompt (prompt &key initial default password choices
+                                       require-match validate)
+  "Ask PROMPT in a modal `lispm-ui-form' dialog and return the string entered.
+INITIAL is the initial text in the field; DEFAULT is returned when the
+field is submitted empty.  PASSWORD masks the input as stars.  CHOICES,
+a list of strings, offers a pop-up menu of presets above the field (or
+alone when REQUIRE-MATCH is non-nil).  VALIDATE, a function of the
+value returning an error string or nil, checks the value before
+submitting.  Cancelling signals `quit'."
+  (if lispm-ui-form-prompt-function
+      (funcall lispm-ui-form-prompt-function prompt
+               :initial initial :default default :password password
+               :choices choices :require-match require-match :validate validate)
+    (let* ((clean (replace-regexp-in-string "[ \t]*:?[ \t]*\\'" "" (or prompt "")))
+           (title (if (string-empty-p clean) (lispm-ui-tr "Choose") clean))
+           (choice-pairs (mapcar (lambda (c)
+                                   (let ((text (format "%s" (if (consp c) (car c) c))))
+                                     (cons text text)))
+                                 choices))
+           (init-val (cond ((and (stringp initial) (not (string-empty-p initial))) initial)
+                           ((and (stringp default) (not (string-empty-p default))) default)
+                           ((and require-match choice-pairs) (caar choice-pairs))
+                           (t "")))
+           (submitted nil)
+           (result nil)
+           (buffer nil)
+           (cleanup nil)
+           (depth (recursion-depth))
+           (fields
+            (cond
+             ((and choice-pairs require-match)
+              `((:value :type choice :label ,title
+                        :value ,init-val
+                        :choices ,choice-pairs)))
+             (choice-pairs
+              `((:preset :type choice :label ,(lispm-ui-tr "Choose")
+                         :value ,(and (assoc init-val choice-pairs) init-val)
+                         :choices ,choice-pairs
+                         :on-change ,(lambda (val)
+                                       (when (and val (buffer-live-p buffer))
+                                         (with-current-buffer buffer
+                                           (lispm-ui-form-set :value val)))))
+                (:value :type ,(if password 'password 'text) :label ,title
+                        :value ,init-val :submit t :validate ,validate)))
+             (t
+              `((:value :type ,(if password 'password 'text) :label ,title
+                        :value ,init-val :submit t :validate ,validate))))))
+      (setq buffer
+            (lispm-ui-form
+             title fields
+             :on-submit (lambda (values)
+                          (setq submitted t
+                                result (or (alist-get :value values)
+                                           (and (stringp default) default)
+                                           ""))
+                          (when (> (recursion-depth) depth)
+                            (exit-recursive-edit)))
+             :on-cancel (lambda ()
+                          (setq submitted nil)
+                          (when (> (recursion-depth) depth)
+                            (exit-recursive-edit)))
+             :setup (lambda ()
+                      (local-set-key [remap keyboard-quit] #'lispm-ui-form-cancel)
+                      (local-set-key (kbd "ESC") #'lispm-ui-form-cancel))))
+      (with-current-buffer buffer
+        (add-hook 'kill-buffer-hook
+                  (lambda ()
+                    (when (> (recursion-depth) depth)
+                      (exit-recursive-edit)))
+                  nil t))
+      (unwind-protect
+          (progn
+            (setq cleanup (funcall lispm-ui-form-modal-show-function buffer))
+            (with-current-buffer buffer
+              (lispm-ui-form--first-field))
+            (let ((lispm-ui-in-gui-action nil)
+                  (lispm-ui--command-from-mouse nil))
+              (recursive-edit)))
+        (when (functionp cleanup)
+          (ignore-errors (funcall cleanup)))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer)))
+      (unless submitted
+        (signal 'quit nil))
+      result)))
 
 (provide 'lispm-ui-form)
 ;;; lispm-ui-form.el ends here

@@ -197,6 +197,18 @@ by date, the latest first; DESCENDING the other way."
         (progn (lispm-ui-file-dialog--go dialog (nth 1 item)) nil)
       (nth 1 item))))
 
+(defun lispm-ui-file-dialog--directory-only-p (dialog)
+  "Return non-nil when DIALOG chooses a folder rather than a file."
+  (eq (lispm-ui-file-dialog--dialog-predicate dialog) #'file-directory-p))
+
+(defun lispm-ui-file-dialog--choose (dialog)
+  "Choose DIALOG's item selected, or its folder when choosing a folder."
+  (if (lispm-ui-file-dialog--directory-only-p dialog)
+      (if-let* ((item (lispm-ui-file-dialog--item dialog)))
+          (file-name-as-directory (nth 1 item))
+        (lispm-ui-file-dialog--dialog-directory dialog))
+    (lispm-ui-file-dialog--open dialog)))
+
 (defun lispm-ui-file-dialog--type (dialog char)
   "Select DIALOG's first item whose name starts with the letters typed, CHAR
 the last: letters typed within a second of each other make one name."
@@ -249,7 +261,7 @@ Return the file chosen, `cancel', or nil while the dialog stays."
         (selected (or (lispm-ui-file-dialog--dialog-selected dialog) -1)))
     (pcase (lispm-ui-modal-role event)
       ('cancel 'cancel)
-      ('confirm (lispm-ui-file-dialog--open dialog))
+      ('confirm (lispm-ui-file-dialog--choose dialog))
       ('down (lispm-ui-file-dialog--select dialog (1+ selected)) nil)
       ('up (lispm-ui-file-dialog--select dialog (max 0 (1- selected))) nil)
       ('right (when (nth 2 (lispm-ui-file-dialog--item dialog))
@@ -275,7 +287,8 @@ Return the file chosen, `cancel', or nil while the dialog stays."
   "Return the labels of DIALOG's buttons, (CANCEL . DEFAULT): the default
 button opens a folder selected and chooses a file."
   (cons (lispm-ui-tr "Cancel")
-        (if (nth 2 (lispm-ui-file-dialog--item dialog))
+        (if (and (nth 2 (lispm-ui-file-dialog--item dialog))
+                 (not (lispm-ui-file-dialog--directory-only-p dialog)))
             (lispm-ui-tr "Open")
           (lispm-ui-tr "Choose"))))
 
@@ -560,7 +573,10 @@ and right; the controls as Navigation Services drew them."
          svg x y palette label bw
          :default default
          :state (cond ((eq pressed (intern (substring (symbol-name part) 1))) 'pressed)
-                      ((and default (null (lispm-ui-file-dialog--item dialog))) 'disabled)))))
+                      ((and default
+                            (null (lispm-ui-file-dialog--item dialog))
+                            (not (lispm-ui-file-dialog--directory-only-p dialog)))
+                       'disabled)))))
     svg))
 
 (defun lispm-ui-file-dialog--show (frame dialog)
@@ -660,9 +676,10 @@ Return the file chosen, `cancel', or nil while the dialog stays."
   (let ((double (memq 'double (event-modifiers event))))
     (pcase (lispm-ui-file-dialog--at event frame dialog)
       ('cancel (and (lispm-ui-file-dialog--hold frame dialog 'cancel) 'cancel))
-      ('choose (and (lispm-ui-file-dialog--item dialog)
+      ('choose (and (or (lispm-ui-file-dialog--item dialog)
+                        (lispm-ui-file-dialog--directory-only-p dialog))
                     (lispm-ui-file-dialog--hold frame dialog 'choose)
-                    (lispm-ui-file-dialog--open dialog)))
+                    (lispm-ui-file-dialog--choose dialog)))
       ('location
        (when-let* ((item (lispm-ui-file-dialog--menu frame dialog :location
                                                      (lispm-ui-file-dialog--path-items dialog))))
@@ -728,7 +745,9 @@ cancelled; return the file, or nil."
                   nil)
                  ((or (mouse-event-p event) (mouse-movement-p event)) 'ignore)
                  ((eq event ?/) (lispm-ui-file-dialog--shortcut frame dialog t) nil)
-                 ((and (lispm-ui-modal-confirm-p event) (lispm-ui-file-dialog--item dialog))
+                 ((and (lispm-ui-modal-confirm-p event)
+                       (or (lispm-ui-file-dialog--item dialog)
+                           (lispm-ui-file-dialog--directory-only-p dialog)))
                   ;; Return presses the default button, which blinks.
                   (lispm-ui-modal-flash 'button
                                         (lambda ()

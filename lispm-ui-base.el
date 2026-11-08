@@ -57,5 +57,34 @@ a gap of fewer none."
       (/ (+ pixels 4) 8)
     pixels))
 
+(defvar lispm-ui-in-gui-action nil
+  "Non-nil while a control, menu item or form button is running its action.")
+
+(defvar lispm-ui-intercept-in-tests nil
+  "Non-nil to let GUI interception hooks run even while ERT tests run.")
+
+(defvar lispm-ui--command-from-mouse nil
+  "Non-nil when `this-command' was started by a mouse event.")
+
+(defun lispm-ui--record-command-source ()
+  "Record whether `this-command' was started by the mouse or the keyboard."
+  (setq lispm-ui--command-from-mouse
+        (or (mouse-event-p last-command-event)
+            (mouse-event-p last-input-event))))
+
+(add-hook 'pre-command-hook #'lispm-ui--record-command-source)
+
+(defun lispm-ui-gui-action-p ()
+  "Return non-nil when the current operation comes from a GUI control or mouse.
+Keyboard commands typed directly in a buffer return nil."
+  (and (or (not noninteractive) lispm-ui-intercept-in-tests)
+       (not executing-kbd-macro)
+       (or lispm-ui-intercept-in-tests
+           (not (bound-and-true-p ert--running-tests)))
+       (or lispm-ui-in-gui-action
+           lispm-ui--command-from-mouse
+           (mouse-event-p last-input-event)
+           (mouse-event-p last-command-event))))
+
 (provide 'lispm-ui-base)
 ;;; lispm-ui-base.el ends here

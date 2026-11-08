@@ -49,8 +49,12 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
+(require 'lispm-ui-base)
 (require 'lispm-ui-i18n)
 (require 'lispm-ui-palette)
+(require 'lispm-ui-popup)
+
+(autoload 'lispm-ui-form-prompt "lispm-ui-form")
 
 ;;;; Alerts
 
@@ -178,7 +182,10 @@ the system's own panel."
                                      nil t (and file (file-name-nondirectory file))
                                      (lambda (name)
                                        (or (file-directory-p name) (null predicate) (funcall predicate name))))))
-        (and (file-regular-p chosen) (expand-file-name chosen)))
+        (and (or (file-regular-p chosen)
+                 (and (eq predicate #'file-directory-p)
+                      (file-directory-p chosen)))
+             (expand-file-name chosen)))
     (quit nil)))
 
 (cl-defun lispm-ui-choose-file (&key title file directory predicate preview)
@@ -195,6 +202,219 @@ else read in the minibuffer, never in the system's own panel."
         (funcall lispm-ui-choose-file-function :title title :file file :directory directory
                  :predicate predicate :preview preview)
       (lispm-ui--choose-file-in-minibuffer title file directory predicate))))
+
+;;;; Intercepting GUI prompts
+
+(defvar lispm-ui--intercepting nil
+  "Non-nil while an intercepted prompt is already showing a dialog.")
+
+(defun lispm-ui--clean-prompt (prompt &optional fallback)
+  "Return PROMPT trimmed of trailing colons and whitespace, or FALLBACK."
+  (let ((clean (replace-regexp-in-string "[ \t]*:?[ \t]*\\'" "" (or prompt ""))))
+    (if (string-empty-p clean)
+        (or fallback (lispm-ui-tr "Choose"))
+      clean)))
+
+(defun lispm-ui--intercept-yes-or-no (orig-fn prompt)
+  "Route `y-or-n-p' and `yes-or-no-p' to `lispm-ui-alert' for GUI actions."
+  (if (and (not lispm-ui--intercepting)
+           (lispm-ui-gui-action-p)
+           (lispm-ui--alert-shown-p))
+      (let ((lispm-ui--intercepting t)
+            (lispm-ui-in-gui-action t))
+        (eq (lispm-ui-alert 'caution (string-trim (or prompt ""))
+                            `((,(lispm-ui-tr "Cancel") cancel cancel ?n)
+                              (,(lispm-ui-tr "OK") agree default ?y)))
+            'agree))
+    (funcall orig-fn prompt)))
+
+(defun lispm-ui--intercept-multiple-choice (orig-fn prompt choices &rest args)
+  "Route `read-multiple-choice' to `lispm-ui-alert' for GUI actions."
+  (if (and (not lispm-ui--intercepting)
+           (lispm-ui-gui-action-p)
+           (lispm-ui--alert-shown-p)
+           choices)
+      (let* ((lispm-ui--intercepting t)
+             (lispm-ui-in-gui-action t)
+             (buttons
+              (cons (list (lispm-ui-tr "Cancel") 'cancel 'cancel)
+                    (seq-map-indexed
+                     (lambda (entry index)
+                       (let ((key (nth 0 entry))
+                             (label (capitalize (or (nth 1 entry) ""))))
+                         (list label key (and (= index 0) 'default) key)))
+                     choices)))
+             (detail (mapconcat (lambda (entry) (or (nth 2 entry) ""))
+                                (seq-filter (lambda (entry) (nth 2 entry)) choices)
+                                "\n"))
+             (chosen (lispm-ui-alert 'caution (lispm-ui--clean-prompt prompt)
+                                     buttons
+                                     (and (not (string-empty-p detail)) detail))))
+        (if (or (null chosen) (eq chosen 'cancel))
+            (signal 'quit nil)
+          (assq chosen choices)))
+    (apply orig-fn prompt choices args)))
+
+(defun lispm-ui--intercept-read-string (orig-fn prompt &optional initial-input
+                                                history default-value
+                                                inherit-input-method)
+  "Route `read-string' to `lispm-ui-form-prompt' for GUI actions."
+  (if (and (not lispm-ui--intercepting)
+           (lispm-ui-gui-action-p)
+           (lispm-ui-popup-available-p))
+      (let ((lispm-ui--intercepting t)
+            (lispm-ui-in-gui-action t)
+            (init (if (consp initial-input) (car initial-input) initial-input))
+            (def (if (consp default-value) (car default-value) default-value)))
+        (lispm-ui-form-prompt prompt :initial init :default def))
+    (funcall orig-fn prompt initial-input history default-value inherit-input-method)))
+
+(defun lispm-ui--intercept-read-passwd (orig-fn prompt &optional confirm default)
+  "Route `read-passwd' to `lispm-ui-form-prompt' for GUI actions."
+  (if (and (not lispm-ui--intercepting)
+           (lispm-ui-gui-action-p)
+           (lispm-ui-popup-available-p))
+      (let ((lispm-ui--intercepting t)
+            (lispm-ui-in-gui-action t))
+        (lispm-ui-form-prompt prompt :default default :password t))
+    (funcall orig-fn prompt confirm default)))
+
+(defun lispm-ui--intercept-read-number (orig-fn prompt &optional default hist)
+  "Route `read-number' to `lispm-ui-form-prompt' for GUI actions."
+  (if (and (not lispm-ui--intercepting)
+           (lispm-ui-gui-action-p)
+           (lispm-ui-popup-available-p))
+      (let* ((lispm-ui--intercepting t)
+             (lispm-ui-in-gui-action t)
+             (def-str (and default (format "%s" (if (consp default) (car default) default))))
+             (text (lispm-ui-form-prompt
+                    prompt
+                    :default def-str
+                    :validate (lambda (val)
+                                (let ((s (or val def-str "")))
+                                  (unless (string-match-p
+                                           "\\`[ \t]*[-+]?[0-9]*\\.?[0-9]+\\([eE][-+]?[0-9]+\\)?[ \t]*\\'"
+                                           s)
+                                    (lispm-ui-tr "%s: fill this in"
+                                                 (lispm-ui--clean-prompt prompt))))))))
+        (string-to-number text))
+    (funcall orig-fn prompt default hist)))
+
+(defun lispm-ui--completion-candidates (collection predicate)
+  "Return candidate strings from COLLECTION satisfying PREDICATE."
+  (cond
+   ((and (listp collection) (null predicate)
+         (seq-every-p (lambda (x) (or (stringp x) (symbolp x) (consp x))) collection))
+    (mapcar (lambda (x)
+              (let ((k (if (consp x) (car x) x)))
+                (if (symbolp k) (symbol-name k) (format "%s" k))))
+            collection))
+   (t
+    (ignore-errors (all-completions "" collection predicate)))))
+
+(defun lispm-ui--intercept-completing-read (orig-fn prompt collection
+                                                    &optional predicate require-match
+                                                    initial-input hist def
+                                                    inherit-input-method)
+  "Route `completing-read' to a menu or form dialog for GUI actions."
+  (if (and (not lispm-ui--intercepting)
+           (not (eq collection #'read-file-name-internal))
+           (lispm-ui-gui-action-p)
+           (lispm-ui-popup-available-p))
+      (let* ((lispm-ui--intercepting t)
+             (lispm-ui-in-gui-action t)
+             (init (if (consp initial-input) (car initial-input) initial-input))
+             (def-val (if (consp def) (car def) def))
+             (candidates (lispm-ui--completion-candidates collection predicate))
+             (count (length candidates)))
+        (if (and require-match (>= count 1) (<= count 30))
+            (let ((chosen (lispm-ui-choose (mapcar (lambda (c) (cons c c)) candidates)
+                                           (or def-val init)
+                                           nil
+                                           (lispm-ui--clean-prompt prompt))))
+              (if chosen
+                  (car chosen)
+                (signal 'quit nil)))
+          (lispm-ui-form-prompt
+           prompt
+           :initial init
+           :default def-val
+           :choices (and (<= count 60) candidates)
+           :require-match (and require-match (<= count 60) (> count 0) t)
+           :validate (and require-match (> count 60)
+                          (lambda (val)
+                            (let ((s (or val def-val "")))
+                              (unless (test-completion s collection predicate)
+                                (lispm-ui-tr "%s: fill this in"
+                                             (lispm-ui--clean-prompt prompt)))))))))
+    (funcall orig-fn prompt collection predicate require-match
+             initial-input hist def inherit-input-method)))
+
+(defun lispm-ui--intercept-read-file-name (orig-fn prompt &optional dir
+                                                   default-filename mustmatch
+                                                   initial predicate)
+  "Route `read-file-name' to a file or form dialog for GUI actions."
+  (if (and (not lispm-ui--intercepting)
+           (lispm-ui-gui-action-p)
+           (lispm-ui-popup-graphic-p))
+      (let* ((lispm-ui--intercepting t)
+             (lispm-ui-in-gui-action t)
+             (title (lispm-ui--clean-prompt prompt (lispm-ui-tr "Choose a File")))
+             (directory (or dir default-directory)))
+        (if (and (null mustmatch) (stringp initial) (not (string-empty-p initial))
+                 (not (eq predicate #'file-directory-p)))
+            (lispm-ui-form-prompt
+             title
+             :initial (if dir (expand-file-name initial dir) initial)
+             :default (if (consp default-filename) (car default-filename) default-filename))
+          (let ((chosen (lispm-ui-choose-file
+                         :title title
+                         :file (and initial (expand-file-name initial directory))
+                         :directory directory
+                         :predicate predicate)))
+            (or chosen (signal 'quit nil)))))
+    (funcall orig-fn prompt dir default-filename mustmatch initial predicate)))
+
+(defun lispm-ui--intercept-read-directory-name (orig-fn prompt &optional dir
+                                                        default-dirname mustmatch
+                                                        initial)
+  "Route `read-directory-name' to `lispm-ui-choose-file' for GUI actions."
+  (if (and (not lispm-ui--intercepting)
+           (lispm-ui-gui-action-p)
+           (lispm-ui-popup-graphic-p))
+      (let* ((lispm-ui--intercepting t)
+             (lispm-ui-in-gui-action t)
+             (title (lispm-ui--clean-prompt prompt (lispm-ui-tr "Choose")))
+             (chosen (lispm-ui-choose-file
+                      :title title
+                      :directory (or dir default-directory)
+                      :predicate #'file-directory-p)))
+        (or chosen (signal 'quit nil)))
+    (funcall orig-fn prompt dir default-dirname mustmatch initial)))
+
+(defconst lispm-ui--intercept-advices
+  '((y-or-n-p . lispm-ui--intercept-yes-or-no)
+    (yes-or-no-p . lispm-ui--intercept-yes-or-no)
+    (read-multiple-choice . lispm-ui--intercept-multiple-choice)
+    (read-string . lispm-ui--intercept-read-string)
+    (read-passwd . lispm-ui--intercept-read-passwd)
+    (read-number . lispm-ui--intercept-read-number)
+    (completing-read . lispm-ui--intercept-completing-read)
+    (read-file-name . lispm-ui--intercept-read-file-name)
+    (read-directory-name . lispm-ui--intercept-read-directory-name))
+  "Functions intercepted when a GUI action asks a person.")
+
+(defun lispm-ui-intercept-enable ()
+  "Answer GUI-initiated prompts with LispM UI's alerts, menus, forms and dialogs.
+Keyboard commands typed directly in a buffer are left to Emacs."
+  (pcase-dolist (`(,target . ,advice) lispm-ui--intercept-advices)
+    (unless (advice-member-p advice target)
+      (advice-add target :around advice))))
+
+(defun lispm-ui-intercept-disable ()
+  "Stop intercepting GUI-initiated prompts."
+  (pcase-dolist (`(,target . ,advice) lispm-ui--intercept-advices)
+    (advice-remove target advice)))
 
 (provide 'lispm-ui-ask)
 ;;; lispm-ui-ask.el ends here

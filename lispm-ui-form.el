@@ -322,6 +322,8 @@ TAB and S-TAB go from field to field, \\[lispm-ui-form-submit] submits it,
 \\{lispm-ui-form-mode-map}"
   (setq-local truncate-lines nil)
   (setq-local word-wrap t)
+  (setq-local fringe-indicator-alist
+              (cons '(continuation nil nil) fringe-indicator-alist))
   ;; A dialog does not highlight the line point is on.
   (setq-local global-hl-line-mode nil)
   ;; A new line of a text area starts where its panel does, not indented
@@ -669,7 +671,8 @@ as it is drawn now."
                               (lispm-ui-tr "TAB goes to the next field · changes take effect at once · C-c C-c closes")
                             (lispm-ui-tr "TAB goes to the next field · C-c C-c %s · C-c C-k cancels"
                                          (lispm-ui-form--submit-label)))
-                          'face 'lispm-ui-form-help)
+                          'face 'lispm-ui-form-help
+                          'wrap-prefix (lispm-ui-form--indent :left))
               "\n"))
     (when-let* ((intro (plist-get lispm-ui-form--props :intro)))
       (insert "\n" (propertize intro 'line-prefix (lispm-ui-form--indent :left)
@@ -1572,9 +1575,15 @@ from `lispm-ui-form-drawn-hook', and from an application's like it."
 (defun lispm-ui-form--close (buffer)
   "Put the form in BUFFER away."
   (when (buffer-live-p buffer)
-    (if-let* ((window (get-buffer-window buffer)))
-        (quit-window t window)
-      (kill-buffer buffer))))
+    (let ((window (get-buffer-window buffer t)))
+      (cond
+       ((not (window-live-p window))
+        (kill-buffer buffer))
+       ((window-dedicated-p window)
+        (set-window-dedicated-p window nil)
+        (kill-buffer buffer))
+       (t
+        (quit-window t window))))))
 
 (provide 'lispm-ui-form)
 ;;; lispm-ui-form.el ends here

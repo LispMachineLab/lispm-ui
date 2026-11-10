@@ -278,10 +278,12 @@ The colours come from the faces `default', `shadow' and
 `font-lock-constant-face', which this never sets, so it may run again,
 as on every theme enabled.  Return the palette, or nil, leaving the
 current one, when the theme's colours cannot be read."
-  (let ((content (face-background 'default nil t))
-        (text (face-foreground 'default nil t))
-        (dim (face-foreground 'shadow nil t))
-        (accent (face-foreground 'font-lock-constant-face nil t)))
+  (pcase-let ((`(,content ,text ,dim ,accent)
+               (with-temp-buffer
+                 (list (face-background 'default nil t)
+                       (face-foreground 'default nil t)
+                       (face-foreground 'shadow nil t)
+                       (face-foreground 'font-lock-constant-face nil t)))))
     (when (and content text dim accent (color-name-to-rgb content))
       (setq lispm-ui-current-palette
             (lispm-ui-merge-palette (lispm-ui-derive-palette content text dim accent)

@@ -174,10 +174,28 @@ cannot be shown, a blank."
     "sol" "sql" "css" "scss" "html" "xml" "json" "yaml" "yml" "toml" "proto" "mk" "cmake")
   "Extensions of files shown with the code document icon.")
 
+(defvar lispm-ui--image-file-regexp nil
+  "Cached `(EXTENSIONS REGEXPS . REGEXP)' for `image-file-name-regexp'.")
+
+(defun lispm-ui--image-file-p (file)
+  "Return non-nil when FILE matches `image-file-name-regexp'."
+  (let ((regexp (if (and lispm-ui--image-file-regexp
+                         (eq (car lispm-ui--image-file-regexp)
+                             (bound-and-true-p image-file-name-extensions))
+                         (eq (cadr lispm-ui--image-file-regexp)
+                             (bound-and-true-p image-file-name-regexps)))
+                    (cddr lispm-ui--image-file-regexp)
+                  (let ((r (image-file-name-regexp)))
+                    (setq lispm-ui--image-file-regexp
+                          (cons (bound-and-true-p image-file-name-extensions)
+                                (cons (bound-and-true-p image-file-name-regexps) r)))
+                    r))))
+    (string-match-p regexp file)))
+
 (defun lispm-ui-file-icon-name (file)
   "Return the name of the document icon of FILE, by its kind."
   (let ((extension (downcase (or (file-name-extension file) ""))))
-    (cond ((string-match-p (image-file-name-regexp) file) "document-image")
+    (cond ((lispm-ui--image-file-p file) "document-image")
           ((member extension lispm-ui-lisp-extensions) "document-lisp")
           ((member extension '("md" "markdown" "mkd")) "document-markdown")
           ((equal extension "org") "document-org")

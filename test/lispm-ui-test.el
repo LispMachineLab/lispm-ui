@@ -2856,6 +2856,10 @@ chosen is remembered among the recent ones."
         ;; It opens on the file given, selected.
         (should (equal (choose '(return) :file (expand-file-name "bob.jpg" folder))
                        (expand-file-name "bob.jpg" folder)))
+        ;; Unhandled events such as `switch-frame' do not redraw the dialog.
+        (setq shown nil)
+        (should-not (choose '((switch-frame dialog) header-line escape)))
+        (should (= (length shown) 1))
         (should-not (choose '(escape)))
         (should-not (choose '(?\C-n ?\C-g)))))))
 

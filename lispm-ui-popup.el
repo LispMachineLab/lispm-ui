@@ -138,7 +138,8 @@ FRAME, so FRAME stands over it."
     (pcase-let ((`(,x . ,y) (frame-position frame)))
       (set-frame-position shadow (1+ x) (1+ y)))
     (set-frame-parameter frame 'lispm-ui-popup-shadow shadow)
-    (make-frame-visible shadow)))
+    (make-frame-visible shadow)
+    (raise-frame shadow)))
 
 (defun lispm-ui-popup-fill (frame text)
   "Replace popup FRAME's text with TEXT, scrolled to its start."
@@ -206,7 +207,13 @@ display draws at FRAME's edge."
     (when (and shadow (not (lispm-ui-tty-p parent)))
       (lispm-ui-popup--shadow frame shadow))
     (make-frame-visible frame)
-    (redisplay t)))
+    (raise-frame frame)
+    (redisplay t)
+    (when-let* ((shadow-frame (frame-parameter frame 'lispm-ui-popup-shadow)))
+      (when (frame-live-p shadow-frame)
+        (raise-frame shadow-frame)))
+    (when (frame-live-p frame)
+      (raise-frame frame))))
 
 (provide 'lispm-ui-popup)
 ;;; lispm-ui-popup.el ends here

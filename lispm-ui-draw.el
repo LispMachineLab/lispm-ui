@@ -195,10 +195,18 @@ face hardly ever does."
   "Return the font families SVG text set in FAMILY, a face's, is drawn
 in: FAMILY, by default Geneva, then the one for Chinese and Japanese in
 the language spoken, then any sans-serif."
-  (string-join (delq nil (list (if (stringp family) family "Geneva")
-                               (lispm-ui-text-cjk-family)
-                               "sans-serif"))
-               ", "))
+  (let ((compute (lambda ()
+                   (string-join (delq nil (list (if (stringp family) family "Geneva")
+                                                (lispm-ui-text-cjk-family)
+                                                "sans-serif"))
+                                ", "))))
+    (if noninteractive
+        (funcall compute)
+      (with-memoization (gethash (list lispm-ui-palette-generation
+                                       (lispm-ui-current-language)
+                                       'families family)
+                                 lispm-ui--svg-fonts)
+        (funcall compute)))))
 
 (defun lispm-ui-svg-font (&optional face)
   "Return the font of SVG labels matching FACE, by default `lispm-ui-title'.

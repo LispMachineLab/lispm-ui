@@ -326,7 +326,10 @@ On a text terminal the alert is text, see `lispm-ui-alert--text'."
 See `lispm-ui-alert-default'.  It sits over the upper middle of the
 selected frame, as Mac OS 9's alerts did, outlined and casting a black
 shadow.  Return its frame; nothing is read from the user."
-  (let* ((parent (selected-frame))
+  (let* ((parent (let ((f (selected-frame)))
+                   (while (and (framep f) (frame-live-p f) (frame-parent f))
+                     (setq f (frame-parent f)))
+                   f))
          (popup (lispm-ui-popup-make-frame parent))
          (layout (lispm-ui-alert--layout message detail buttons))
          (width (or (plist-get layout :width) lispm-ui-alert-width)))

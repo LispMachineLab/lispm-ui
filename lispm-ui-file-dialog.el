@@ -256,7 +256,8 @@ for each that is there."
 
 (defun lispm-ui-file-dialog--key (dialog event)
   "Do what EVENT, a key, does in DIALOG.
-Return the file chosen, `cancel', or nil while the dialog stays."
+Return the file chosen, `cancel', `ignore' when EVENT does nothing,
+or nil while the dialog stays."
   (let ((rows lispm-ui-file-dialog-rows)
         (selected (or (lispm-ui-file-dialog--dialog-selected dialog) -1)))
     (pcase (lispm-ui-modal-role event)
@@ -264,8 +265,9 @@ Return the file chosen, `cancel', or nil while the dialog stays."
       ('confirm (lispm-ui-file-dialog--choose dialog))
       ('down (lispm-ui-file-dialog--select dialog (1+ selected)) nil)
       ('up (lispm-ui-file-dialog--select dialog (max 0 (1- selected))) nil)
-      ('right (when (nth 2 (lispm-ui-file-dialog--item dialog))
-                (lispm-ui-file-dialog--open dialog)))
+      ('right (if (nth 2 (lispm-ui-file-dialog--item dialog))
+                  (lispm-ui-file-dialog--open dialog)
+                'ignore))
       ((or 'left 'back) (lispm-ui-file-dialog--up dialog) nil)
       (_
        (pcase event
@@ -277,9 +279,10 @@ Return the file chosen, `cancel', or nil while the dialog stays."
           nil)
          (?~ (lispm-ui-file-dialog--go dialog "~/") nil)
          ((pred characterp)
-          (when (and (>= event ?\s) (< event 127) (not (eq event ?/)))
-            (lispm-ui-file-dialog--type dialog event))
-          nil))))))
+          (if (and (>= event ?\s) (< event 127) (not (eq event ?/)))
+              (progn (lispm-ui-file-dialog--type dialog event) nil)
+            'ignore))
+         (_ 'ignore))))))
 
 ;;;; Layout
 
@@ -612,7 +615,9 @@ menu is open; return the item chosen, or nil."
     (setf (lispm-ui-file-dialog--dialog-pressed dialog) (intern (substring (symbol-name part) 1)))
     (lispm-ui-file-dialog--show frame dialog)
     (unwind-protect
-        (lispm-ui-menu-choose items (+ fx x) (+ fy y h))
+        (let ((lispm-ui-menu-parent (or (and (framep frame) (frame-live-p frame) (frame-parent frame))
+                                        (selected-frame))))
+          (lispm-ui-menu-choose items (+ fx x) (+ fy y h)))
       (setf (lispm-ui-file-dialog--dialog-pressed dialog) nil))))
 
 (defun lispm-ui-file-dialog--folder-icon ()
@@ -637,7 +642,10 @@ menu is open; return the item chosen, or nil."
 to the one chosen.  KEYBOARD says the keyboard asked: nothing is held."
   (when-let* ((item (if keyboard
                         (pcase-let ((`(,x ,y ,_ ,h) (plist-get (lispm-ui-file-dialog--layout) :shortcuts))
-                                    (`(,fx . ,fy) (frame-position frame)))
+                                    (`(,fx . ,fy) (frame-position frame))
+                                    (lispm-ui-menu-parent (or (and (framep frame) (frame-live-p frame)
+                                                                   (frame-parent frame))
+                                                              (selected-frame))))
                           (lispm-ui-menu-choose (lispm-ui-file-dialog--place-items) (+ fx x) (+ fy y h)))
                       (lispm-ui-file-dialog--menu frame dialog :shortcuts
                                                   (lispm-ui-file-dialog--place-items)))))
@@ -659,27 +667,37 @@ the list following it, until the mouse rises."
     (catch 'done
       (while t
         (let ((event (lispm-ui-modal-read)))
+          (when (and (mouse-movement-p event) (not noninteractive))
+            (let (next)
+              (while (and (setq next (lispm-ui-modal-read 0))
+                          (mouse-movement-p next))
+                (setq event next))
+              (when next
+                (push next unread-command-events))))
           (cond ((or (lispm-ui-modal-mouse-up-p event) (lispm-ui-modal-cancel-p event))
                  (throw 'done nil))
                 ((mouse-movement-p event)
                  (when-let* ((position (lispm-ui-modal-over event frame))
                              (y (cdr (posn-x-y position)))
                              (thumb (lispm-ui-file-dialog--thumb dialog height)))
-                   (let ((free (max 1 (- track (cdr thumb)))))
+                   (let ((free (max 1 (- track (cdr thumb))))
+                         (old (lispm-ui-file-dialog--dialog-top dialog)))
                      (lispm-ui-file-dialog--scroll-to
                       dialog (round (* room (/ (float (- y top grab)) free))))
-                     (lispm-ui-file-dialog--show frame dialog))))))))))
+                     (unless (= old (lispm-ui-file-dialog--dialog-top dialog))
+                       (lispm-ui-file-dialog--show frame dialog)))))))))))
 
 (defun lispm-ui-file-dialog--click (frame dialog event)
   "Do what mouse EVENT, a press, does in DIALOG, shown in FRAME.
 Return the file chosen, `cancel', or nil while the dialog stays."
   (let ((double (memq 'double (event-modifiers event))))
     (pcase (lispm-ui-file-dialog--at event frame dialog)
-      ('cancel (and (lispm-ui-file-dialog--hold frame dialog 'cancel) 'cancel))
-      ('choose (and (or (lispm-ui-file-dialog--item dialog)
-                        (lispm-ui-file-dialog--directory-only-p dialog))
-                    (lispm-ui-file-dialog--hold frame dialog 'choose)
-                    (lispm-ui-file-dialog--choose dialog)))
+      ('cancel (if (lispm-ui-file-dialog--hold frame dialog 'cancel) 'cancel 'ignore))
+      ('choose (if (and (or (lispm-ui-file-dialog--item dialog)
+                            (lispm-ui-file-dialog--directory-only-p dialog))
+                        (lispm-ui-file-dialog--hold frame dialog 'choose))
+                   (lispm-ui-file-dialog--choose dialog)
+                 'ignore))
       ('location
        (when-let* ((item (lispm-ui-file-dialog--menu frame dialog :location
                                                      (lispm-ui-file-dialog--path-items dialog))))
@@ -722,9 +740,16 @@ Return the file chosen, `cancel', or nil while the dialog stays."
                          (y (cdr (posn-x-y (event-start event)))))
               (lispm-ui-file-dialog--drag-thumb
                frame dialog (- y bar-top (car (lispm-ui-file-dialog--thumb dialog height))))))))
-       nil))))
+       nil)
+      (_ 'ignore))))
 
 ;;;; The dialog
+
+(defun lispm-ui-file-dialog--wheel-delta (event)
+  "Return row scroll delta for wheel EVENT, or nil when not a vertical wheel."
+  (let ((basic (or (ignore-errors (event-basic-type event)) (car-safe event))))
+    (cond ((memq basic '(wheel-down mouse-5 double-wheel-down triple-wheel-down)) 3)
+          ((memq basic '(wheel-up mouse-4 double-wheel-up triple-wheel-up)) -3))))
 
 (defun lispm-ui-file-dialog--loop (frame dialog)
   "Read events for DIALOG, shown in FRAME, until a file is chosen or it is
@@ -733,16 +758,29 @@ cancelled; return the file, or nil."
     (catch 'done
       (while t
         (let* ((event (lispm-ui-modal-read))
+               (wheel (lispm-ui-file-dialog--wheel-delta event))
                (result
                 (cond
                  ((lispm-ui-modal-mouse-down-p event)
                   (lispm-ui-file-dialog--click frame dialog event))
-                 ((memq (event-basic-type event) '(wheel-up wheel-down mouse-4 mouse-5))
-                  (when (lispm-ui-modal-over event frame)
-                    (lispm-ui-file-dialog--scroll-to
-                     dialog (+ (lispm-ui-file-dialog--dialog-top dialog)
-                               (if (memq (event-basic-type event) '(wheel-down mouse-5)) 3 -3))))
-                  nil)
+                 (wheel
+                  (if (not (lispm-ui-modal-over event frame))
+                      'ignore
+                    (let ((old (lispm-ui-file-dialog--dialog-top dialog))
+                          (delta wheel)
+                          next next-delta)
+                      (unless noninteractive
+                        (while (and (setq next (lispm-ui-modal-read 0))
+                                    (setq next-delta (lispm-ui-file-dialog--wheel-delta next))
+                                    (lispm-ui-modal-over next frame))
+                          (setq delta (+ delta next-delta)
+                                next nil))
+                        (when next
+                          (push next unread-command-events)))
+                      (lispm-ui-file-dialog--scroll-to dialog (+ old delta))
+                      (if (= old (lispm-ui-file-dialog--dialog-top dialog))
+                          'ignore
+                        nil))))
                  ((or (mouse-event-p event) (mouse-movement-p event)) 'ignore)
                  ((eq event ?/) (lispm-ui-file-dialog--shortcut frame dialog t) nil)
                  ((and (lispm-ui-modal-confirm-p event)
@@ -777,7 +815,10 @@ This is the default `lispm-ui-choose-file-function'."
     (if (not (lispm-ui-popup-graphic-p))
         (lispm-ui--choose-file-in-minibuffer title file directory predicate)
       (let* ((dialog (lispm-ui-file-dialog--make-dialog :title title :predicate predicate :preview preview))
-             (parent (selected-frame))
+             (parent (let ((f (or lispm-ui-menu-parent (selected-frame))))
+                       (while (and (framep f) (frame-live-p f) (frame-parent f))
+                         (setq f (frame-parent f)))
+                       f))
              (frame (progn (lispm-ui-file-dialog--go dialog directory (and file (file-name-nondirectory file)))
                            (lispm-ui-popup-make-frame parent)))
              (layout (lispm-ui-file-dialog--layout)))

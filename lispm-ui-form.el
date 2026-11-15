@@ -323,6 +323,9 @@ TAB and S-TAB go from field to field, \\[lispm-ui-form-submit] submits it,
 \\{lispm-ui-form-mode-map}"
   (setq-local truncate-lines nil)
   (setq-local word-wrap t)
+  (setq-local display-line-numbers nil)
+  (when (bound-and-true-p display-line-numbers-mode)
+    (display-line-numbers-mode -1))
   (setq-local fringe-indicator-alist
               (cons '(continuation nil nil) fringe-indicator-alist))
   ;; A dialog does not highlight the line point is on.
@@ -335,7 +338,7 @@ TAB and S-TAB go from field to field, \\[lispm-ui-form-submit] submits it,
 ;;;; Making a form
 
 (cl-defun lispm-ui-form (title fields &key values submit cancel intro on-submit on-cancel
-                                 instant mode setup)
+                                 instant modal mode setup)
   "Make a form titled TITLE of FIELDS in a buffer of its own; return the buffer.
 FIELDS are as lispm-ui-form.el says.  VALUES, an alist (KEY . VALUE),
 are the fields' values at first, before their :value.  SUBMIT and
@@ -345,9 +348,10 @@ valid, an alist (KEY . VALUE) of those of the fields shown: a text
 trimmed, nil when empty.  ON-CANCEL is called when it is cancelled.
 INSTANT non-nil makes a form whose changes apply at once, through its
 fields' :on-change: it has no Cancel button, and a button closing it,
-labelled SUBMIT, only when SUBMIT is given.  MODE is the major mode of
-its buffer, `lispm-ui-form-mode' or one derived from it; SETUP, if
-non-nil, is called with no argument in its buffer before it is drawn."
+labelled SUBMIT, only when SUBMIT is given.  MODAL non-nil marks a
+compact modal dialog.  MODE is the major mode of its buffer,
+`lispm-ui-form-mode' or one derived from it; SETUP, if non-nil, is
+called with no argument in its buffer before it is drawn."
   (let ((buffer (generate-new-buffer (format "*%s*" title))))
     (with-current-buffer buffer
       (funcall (or mode #'lispm-ui-form-mode))
@@ -356,7 +360,8 @@ non-nil, is called with no argument in its buffer before it is drawn."
       (setq lispm-ui-form--title title
             lispm-ui-form--fields fields
             lispm-ui-form--props (list :submit submit :cancel cancel :intro intro
-                                    :on-submit on-submit :on-cancel on-cancel :instant instant)
+                                    :on-submit on-submit :on-cancel on-cancel
+                                    :instant instant :modal modal)
             lispm-ui-form--values
             (mapcar (lambda (field)
                       (let ((key (car field)))
@@ -682,6 +687,10 @@ as it is drawn now."
       (insert "\n" (propertize intro 'line-prefix (lispm-ui-form--indent :left)
                                'wrap-prefix (lispm-ui-form--indent :left))
               "\n"))
+    (when (and (plist-get lispm-ui-form--props :modal)
+               (not lispm-ui-form-show-header)
+               (not (plist-get lispm-ui-form--props :intro)))
+      (insert (propertize "\n" 'face '(:height 0.7))))
     (dolist (field lispm-ui-form--fields)
       (when (lispm-ui-form--shown-p field)
         (pcase (plist-get (cdr field) :type)
@@ -711,15 +720,16 @@ one; of a form applying its changes at once, the one closing it, if any."
   (let* ((instant (plist-get lispm-ui-form--props :instant))
          (cancel (or (plist-get lispm-ui-form--props :cancel) (lispm-ui-tr "Cancel")))
          (submit (if instant (plist-get lispm-ui-form--props :submit) (lispm-ui-form--submit-label)))
-         (gap (plist-get lispm-ui-form--geometry :em)))
+         (gap (plist-get lispm-ui-form--geometry :em))
+         (edge (if (plist-get lispm-ui-form--props :modal) :right :outer)))
     (cond (instant
            (when submit
-             (insert (lispm-ui-form--at :outer (lispm-ui-form--button-width submit t)))
+             (insert (lispm-ui-form--at edge (lispm-ui-form--button-width submit t)))
              (lispm-ui-form--button submit #'lispm-ui-form-submit t)
              (insert "\n")))
           (t
-           (insert (lispm-ui-form--at :outer (+ (lispm-ui-form--button-width cancel nil) gap
-                                             (lispm-ui-form--button-width submit t))))
+           (insert (lispm-ui-form--at edge (+ (lispm-ui-form--button-width cancel nil) gap
+                                              (lispm-ui-form--button-width submit t))))
            (lispm-ui-form--button cancel #'lispm-ui-form-cancel)
            (insert (propertize " " 'display `(space :width (,gap))))
            (lispm-ui-form--button submit #'lispm-ui-form-submit t)
@@ -849,7 +859,10 @@ one; of a form applying its changes at once, the one closing it, if any."
                                                 (when-let* ((choice (funcall lispm-ui-form-choose-function
                                                                              (or label lispm-ui-form--title)
                                                                              choices value event)))
-                                                  (lispm-ui-form--changed key (car choice) t)))))))))
+                                                  (lispm-ui-form--changed key (car choice) t)))))
+                  (when-let* ((buttons (plist-get props :buttons)))
+                    (insert (propertize " " 'display `(space :width (,(plist-get lispm-ui-form--geometry :em)))))
+                    (lispm-ui-form--insert-buttons (or (plist-get props :buttons-key) key) buttons))))))
         ('picture
          (row (lambda ()
                 (label)
@@ -1600,6 +1613,9 @@ from `lispm-ui-form-drawn-hook', and from an application's like it."
 
 ;;;; Modal prompt forms
 
+(defconst lispm-ui-form-choice-buttons-supported t
+  "Non-nil when `choice' fields support inline `:buttons' and `:buttons-key'.")
+
 (defvar lispm-ui-form-modal-show-function #'lispm-ui-form--modal-show-default
   "Function showing a modal form's buffer and returning a cleanup function.
 Called with BUFFER, it displays BUFFER in a selected window or frame and
@@ -1711,6 +1727,7 @@ submitting.  Cancelling signals `quit'."
       (setq buffer
             (lispm-ui-form
              title fields
+             :modal t
              :on-submit (lambda (values)
                           (setq submitted t
                                 result (or (alist-get :value values)

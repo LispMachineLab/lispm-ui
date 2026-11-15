@@ -767,6 +767,33 @@ action called."
       (should (equal (get-text-property (point-min) 'display)
                      (get-text-property (point-min) 'lispm-ui-plain))))))
 
+(ert-deftest lispm-ui-test-press-target-and-hold ()
+  "A bar button held with `lispm-ui-press' sets `lispm-ui-pressed' on its
+window while the mouse stays over it, ignores `switch-frame', area
+prefixes and pointer jitter, and runs its command on the first click."
+  (let* ((win (selected-window))
+         (btn-str (propertize " " 'lispm-ui-target '(mode-line confirm)))
+         (other-str (propertize " " 'lispm-ui-target '(mode-line cancel)))
+         (on-pos (list win 'mode-line '(10 . 5) 0 (cons btn-str 0) nil))
+         (off-pos (list win 'mode-line '(40 . 5) 0 (cons other-str 0) nil))
+         (ran 0)
+         (states nil))
+    (cl-letf (((symbol-function 'redisplay)
+               (lambda (&rest _)
+                 (push (lispm-ui-pressed-p '(mode-line confirm) win) states))))
+      (let ((unread-command-events
+             (list (list 'switch-frame (selected-frame))
+                   'mode-line
+                   (list 'mouse-movement off-pos)
+                   (list 'mouse-movement on-pos)
+                   'mode-line
+                   (list 'mouse-1 on-pos))))
+        (lispm-ui-press on-pos (lispm-ui-same-target-p on-pos)
+                        (lambda () (cl-incf ran))))
+      (should (= ran 1))
+      (should (equal (nreverse states) '(t nil t nil)))
+      (should-not (lispm-ui-pressed-p '(mode-line confirm) win)))))
+
 (ert-deftest lispm-ui-test-popup-in-buffer ()
   "A pop-up menu in a buffer asks with `lispm-ui-choose', its current
 choice checked, and gives its action the value chosen; nothing when
@@ -2275,20 +2302,42 @@ a text area still selects words, and a drag still selects text."
 
 (ert-deftest lispm-ui-test-form-mouse-keeps-point ()
   "A click on a control that draws the form again leaves point in the
-field it was in, where it was."
-  (let* ((lispm-ui-current-palette nil)
-         (buffer (lispm-ui-form "Pet" '((name :type text :label "Name" :value "Rex")
-                                         (check :type check :label "Check")))))
+field it was in, where it was; pointer movement or frame focus events
+during the press do not abort the first click."
+  (let* ((lispm-ui-current-palette (apply #'lispm-ui-derive-palette lispm-ui-test--classic))
+         (clicked 0)
+         (buffer (cl-letf (((symbol-function 'widget-image-find)
+                            (lambda (image) (and (eq (car-safe image) 'image) image))))
+                   (lispm-ui-form "Pet" `((name :type text :label "Name" :value "Rex")
+                                          (check :type check :label "Check")
+                                          (act :type buttons
+                                               :buttons (("Choose…" . ,(lambda () (cl-incf clicked))))))))))
     (unwind-protect
         (save-window-excursion
           (switch-to-buffer buffer)
           (let ((here (+ 2 (widget-field-start (alist-get 'name lispm-ui-form--widgets))))
-                (box (alist-get 'check lispm-ui-form--widgets)))
+                (box (alist-get 'check lispm-ui-form--widgets))
+                (btn (alist-get 'act lispm-ui-form--widgets)))
             (goto-char here)
             (lispm-ui-test--form-mouse 'down-mouse-1 (widget-get box :from))
             (should (lispm-ui-form-value 'check))
             (should (= (point) here))
-            (should (eq (lispm-ui-form--key-at (point)) 'name))))
+            (should (eq (lispm-ui-form--key-at (point)) 'name))
+            ;; Even when `switch-frame' and `mouse-movement' arrive before
+            ;; `mouse-1', the button activates on the first click.
+            (let* ((btn (alist-get 'act lispm-ui-form--widgets))
+                   (pos (overlay-start (widget-get btn :button-overlay)))
+                   (start (list (selected-window) pos '(0 . 0) 0 nil pos))
+                   (moved (list (selected-window) pos '(2 . 1) 0 nil pos))
+                   (event (list 'down-mouse-1 start))
+                   (last-input-event event)
+                   (unread-command-events
+                    (list (list 'switch-frame (selected-frame))
+                          (list 'mouse-movement moved)
+                          (list 'drag-mouse-1 start moved))))
+              (lispm-ui-form--mouse event)
+              (should (= clicked 1))
+              (should (= (point) here)))))
       (kill-buffer buffer))))
 
 (ert-deftest lispm-ui-test-form-mouse-empty ()

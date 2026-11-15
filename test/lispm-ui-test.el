@@ -791,7 +791,7 @@ prefixes and pointer jitter, and runs its command on the first click."
         (lispm-ui-press on-pos (lispm-ui-same-target-p on-pos)
                         (lambda () (cl-incf ran))))
       (should (= ran 1))
-      (should (equal (nreverse states) '(t nil t nil)))
+      (should (equal (nreverse states) '(t nil t)))
       (should-not (lispm-ui-pressed-p '(mode-line confirm) win)))))
 
 (ert-deftest lispm-ui-test-popup-in-buffer ()

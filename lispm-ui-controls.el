@@ -952,25 +952,34 @@ at POSITION."
 WINDOW defaults to the selected window."
   (equal (window-parameter (or window (selected-window)) 'lispm-ui-pressed) target))
 
-(defun lispm-ui-press (position pressed-p command)
+(defun lispm-ui-press (position pressed-p command &optional target)
   "Hold a control at POSITION pressed until the mouse button rises.
 While the mouse is over the control (where PRESSED-P accepts the mouse
-event's position), the window parameter `lispm-ui-pressed' holds the
-target at POSITION so the control is drawn pushed in; moving off draws it
-out again.  When the button rises over the control, COMMAND is called
-with no arguments."
+event's position), the window parameter `lispm-ui-pressed' holds TARGET
+\(by default `lispm-ui-press-target' at POSITION) so the control is drawn
+pushed in; moving off draws it out again.  When the button rises over the
+control, COMMAND is called with no arguments."
   (let ((window (posn-window position))
-        (target (lispm-ui-press-target position)))
+        (target (or target (lispm-ui-press-target position)))
+        (holding t))
     (when (window-live-p window)
-      (when (lispm-ui-modal-hold
-             (lambda (event)
-               (funcall pressed-p (event-end event)))
-             (lambda (in)
-               (when (window-live-p window)
-                 (set-window-parameter window 'lispm-ui-pressed (and in target))
-                 (with-current-buffer (window-buffer window)
-                   (force-mode-line-update))
-                 (redisplay t))))
+      (when (unwind-protect
+                (lispm-ui-modal-hold
+                 (lambda (event)
+                   (let ((over (funcall pressed-p (event-end event))))
+                     (when (lispm-ui-modal-mouse-up-p event)
+                       (setq holding nil))
+                     over))
+                 (lambda (in)
+                   (when (and holding (window-live-p window))
+                     (set-window-parameter window 'lispm-ui-pressed (and in target))
+                     (with-current-buffer (window-buffer window)
+                       (force-mode-line-update))
+                     (redisplay t))))
+              (when (window-live-p window)
+                (set-window-parameter window 'lispm-ui-pressed nil)
+                (with-current-buffer (window-buffer window)
+                  (force-mode-line-update))))
         (let ((lispm-ui-in-gui-action t))
           (funcall command))))))
 

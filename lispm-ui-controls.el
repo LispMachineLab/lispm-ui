@@ -943,7 +943,8 @@ at POSITION."
         (area (posn-area position))
         (target (lispm-ui-press-target position)))
     (lambda (release)
-      (and (eq (posn-window release) window)
+      (and target
+           (eq (posn-window release) window)
            (eq (posn-area release) area)
            (equal (lispm-ui-press-target release) target)))))
 
@@ -967,7 +968,8 @@ control, COMMAND is called with no arguments in POSITION's window."
       (when (unwind-protect
                 (lispm-ui-modal-hold
                  (lambda (event)
-                   (let ((over (funcall pressed-p (event-end event))))
+                   (let ((over (and (window-live-p window)
+                                    (funcall pressed-p (event-end event)))))
                      (when (lispm-ui-modal-mouse-up-p event)
                        (setq holding nil))
                      over))
@@ -981,11 +983,10 @@ control, COMMAND is called with no arguments in POSITION's window."
                 (set-window-parameter window 'lispm-ui-pressed nil)
                 (with-current-buffer (window-buffer window)
                   (force-mode-line-update))))
-        (let ((lispm-ui-in-gui-action t))
-          (if (window-live-p window)
-              (with-selected-window window
-                (funcall command))
-            (funcall command)))))))
+        (when (window-live-p window)
+          (let ((lispm-ui-in-gui-action t))
+            (with-selected-window window
+              (funcall command))))))))
 
 (defun lispm-ui--press-at (position)
   "Draw the push button at POSITION pushed in, until it is let go.

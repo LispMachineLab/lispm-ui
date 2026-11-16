@@ -1236,8 +1236,9 @@ controls do."
                          position)))
         (let ((lispm-ui-in-gui-action t))
           (widget-apply-action button event))
-        (when (and place (buffer-live-p (current-buffer)))
-          (lispm-ui-form--go-to place))))))
+        (when (and place (funcall same-buffer-p))
+          (with-current-buffer buffer
+            (lispm-ui-form--go-to place)))))))
 
 (defun lispm-ui-form--mouse (event)
   "Do what the mouse EVENT does in a form, as in a dialog: on a field or a

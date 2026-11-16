@@ -383,6 +383,8 @@ called with no argument in its buffer before it is drawn."
                                 lispm-ui-form--fields)))
     (goto-char (or (widget-field-start widget) (widget-get widget :from)))))
 
+(defalias 'lispm-ui-form-first-field #'lispm-ui-form--first-field)
+
 (defun lispm-ui-form-value (key)
   "The value of the field KEY of the form in this buffer, as it is now.
 A text is trimmed, a password not; either is nil when empty."
@@ -775,7 +777,7 @@ one; of a form applying its changes at once, the one closing it, if any."
                                     ;; Padded far, its padding drawn as one
                                     ;; blank to the fields' right edge: see
                                     ;; `lispm-ui-form--shape-field'.
-                                    :size 200
+                                    :size (max 200 (+ 32 (length (or value ""))))
                                     :format "%v"
                                     :value (or value "")
                                     :lispm-form-width (plist-get props :width)
@@ -1028,6 +1030,17 @@ field's edge onto a line of its own.  Its padding, the blanks Emacs's
 widgets end a field of a fixed size with, is drawn as one blank reaching
 to the right edge, the rest of it hidden, so that the field is one run
 of its face, framed once."
+  (when (and (widget-field-start widget)
+             (widget-field-end widget)
+             (widget-field-text-end widget)
+             (>= (widget-field-text-end widget) (1- (widget-field-end widget))))
+    (with-silent-modifications
+      (save-excursion
+        (goto-char (widget-field-end widget))
+        (if (overlayp (widget-get widget :field-overlay))
+            (insert (make-string 32 ?\s))
+          (insert-before-markers (make-string 32 ?\s))))
+      (widget-put widget :size (- (widget-field-end widget) (widget-field-start widget)))))
   (let* ((start (widget-field-start widget))
          (end (widget-field-end widget))
          (text-end (widget-field-text-end widget))
@@ -1745,6 +1758,8 @@ REQUIRE-MATCH VALIDATE).")
         (when (window-configuration-p config)
           (set-window-configuration config))))))
 
+(defalias 'lispm-ui-form-modal-show-default #'lispm-ui-form--modal-show-default)
+
 (cl-defun lispm-ui-form-prompt (prompt &key initial default password choices
                                        require-match validate choose-directory)
   "Ask PROMPT in a modal `lispm-ui-form' dialog and return the string entered.
@@ -1772,6 +1787,7 @@ signals `quit'."
                            ((and require-match choice-pairs) (caar choice-pairs))
                            (t "")))
            (submitted nil)
+           (closing nil)
            (result nil)
            (buffer nil)
            (cleanup nil)
@@ -1826,7 +1842,8 @@ signals `quit'."
              ((and choice-pairs require-match)
               `((:value :type choice :label ,title
                         :value ,init-val
-                        :choices ,choice-pairs)))
+                        :choices ,choice-pairs
+                        :validate ,validate)))
              (choice-pairs
               `((:preset :type choice :label ,(lispm-ui-tr "Choose")
                          :value ,(and (assoc init-val choice-pairs) init-val)
@@ -1845,25 +1862,30 @@ signals `quit'."
              title fields
              :modal t
              :on-submit (lambda (values)
-                          (setq submitted t
-                                result (or (alist-get :value values)
-                                           (and (stringp default) default)
-                                           ""))
-                          (when (> (recursion-depth) depth)
-                            (exit-recursive-edit)))
+                          (when (<= (recursion-depth) (1+ depth))
+                            (setq submitted t
+                                  result (or (alist-get :value values)
+                                             (and (stringp default) default)
+                                             ""))
+                            (when (= (recursion-depth) (1+ depth))
+                              (exit-recursive-edit))))
              :on-cancel (lambda ()
-                          (setq submitted nil)
-                          (when (> (recursion-depth) depth)
-                            (exit-recursive-edit)))
+                          (when (<= (recursion-depth) (1+ depth))
+                            (setq submitted nil)
+                            (when (= (recursion-depth) (1+ depth))
+                              (exit-recursive-edit))))
              :setup (lambda ()
+                      (use-local-map (copy-keymap (current-local-map)))
                       (local-set-key [remap keyboard-quit] #'lispm-ui-form-cancel)
                       (local-set-key (kbd "ESC") #'lispm-ui-form-cancel)
                       (local-set-key (kbd "<escape>") #'lispm-ui-form-cancel))))
       (with-current-buffer buffer
         (add-hook 'kill-buffer-hook
                   (lambda ()
-                    (when (> (recursion-depth) depth)
-                      (exit-recursive-edit)))
+                    (unless closing
+                      (setq submitted nil)
+                      (when (= (recursion-depth) (1+ depth))
+                        (exit-recursive-edit))))
                   nil t))
       (unwind-protect
           (progn
@@ -1876,6 +1898,7 @@ signals `quit'."
             (let ((lispm-ui-in-gui-action nil)
                   (lispm-ui--command-from-mouse nil))
               (recursive-edit)))
+        (setq closing t)
         (when (functionp cleanup)
           (ignore-errors (funcall cleanup)))
         (when (buffer-live-p buffer)

@@ -996,12 +996,13 @@ blinks.  Return non-nil when the button was pressed."
   (let ((pressed (get-text-property position 'lispm-ui-pressed))
         (shown (get-text-property position 'display)))
     (if (not (mouse-event-p last-input-event))
-        (progn
-          (lispm-ui--swap-image position pressed)
-          (redisplay t)
-          (sit-for (alist-get 'button lispm-ui-modal-flashes))
-          (lispm-ui--swap-image position shown)
-          t)
+        (unwind-protect
+            (progn
+              (lispm-ui--swap-image position pressed)
+              (redisplay t)
+              (sit-for (alist-get 'button lispm-ui-modal-flashes))
+              t)
+          (lispm-ui--swap-image position shown))
       (let ((window (posn-window (event-start last-input-event))))
         (lispm-ui-modal-hold
          (lambda (event)

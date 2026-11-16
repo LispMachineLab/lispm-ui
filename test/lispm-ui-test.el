@@ -3324,6 +3324,8 @@ file dialogs, whereas native keyboard commands are not intercepted."
             (should (equal (car calls) '(file :title "Folder" :directory "/tmp/" :predicate file-directory-p)))
             (should (equal (read-file-name "Save: " nil nil nil "~/Console.txt") "~/Console.txt"))
             (should (equal (car calls) '(form "Save" :initial "~/Console.txt" :default nil)))
+            (should (equal (read-file-name "New file: " "/tmp/" nil nil nil) "/tmp/"))
+            (should (equal (car calls) '(form "New file" :initial "/tmp/" :default nil)))
             (should (stringp (completing-read "Select project: " '("/tmp/" "... (choose a dir)") nil t)))
             (should (eq (car (car calls)) 'form))
             (should (plist-get (cddr (car calls)) :choose-directory)))
@@ -3338,6 +3340,58 @@ file dialogs, whereas native keyboard commands are not intercepted."
             (let ((lispm-ui-in-gui-action t))
               (should (lispm-ui-gui-action-p)))))
       (lispm-ui-intercept-disable))))
+
+(ert-deftest lispm-ui-test-review-regressions ()
+  "Verify fixes for keymap isolation, 2-button alert widening, `read-passwd'
+confirm, `completing-read' `require-match', `~'-prefixed filenames, and
+>=200 character text fields."
+  ;; 1. 2-button alert without apart button widens when right buttons would cross x=16:
+  (let ((lispm-ui-current-palette (lispm-ui-test--classic-palette)))
+    (cl-letf (((symbol-function 'lispm-ui-push-button-width)
+               (lambda (label) (+ 24 (* 6 (length label))))))
+      (let* ((buttons (list (list (make-string 30 ?A) 'cancel 'cancel)
+                            (list (make-string 30 ?B) 'ok 'default)))
+             (layout (lispm-ui-alert-layout "Short" nil buttons)))
+        (should (> (plist-get layout :width) lispm-ui-alert-width))
+        (dolist (btn (plist-get layout :buttons))
+          (should (>= (nth 3 btn) 16))))))
+  ;; 2. Literal `~foo' filename in file-dialog is not home-expanded:
+  (let ((tmp (make-temp-file "lispm-ui-tilde-" t)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "./~notes.txt" tmp)
+            (insert "hi"))
+          (let* ((items (lispm-ui-file-dialog--read tmp nil))
+                 (item (seq-find (lambda (it) (equal (car it) "~notes.txt")) items)))
+            (should item)
+            (should (equal (nth 1 item) (expand-file-name "./~notes.txt" tmp)))))
+      (delete-directory tmp t)))
+  ;; 3. Text field with >= 200 chars preserves trailing space so right border aligns:
+  (let* ((lispm-ui-current-palette (lispm-ui-test--classic-palette))
+         (long-val (make-string 220 ?x))
+         (buffer (cl-letf (((symbol-function 'widget-image-find)
+                            (lambda (image) (and (eq (car-safe image) 'image) image))))
+                   (lispm-ui-form "Long" `((path :type text :label "Path" :value ,long-val))))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (let ((widget (alist-get 'path lispm-ui-form--widgets)))
+            (should (< (widget-field-text-end widget) (widget-field-end widget)))))
+      (kill-buffer buffer)))
+  ;; 4. `read-passwd' with `confirm' prompts twice and checks equality:
+  (let ((prompts nil))
+    (cl-letf (((symbol-function 'lispm-ui-gui-action-p) (lambda () t))
+              ((symbol-function 'lispm-ui-popup-available-p) (lambda () t))
+              ((symbol-function 'lispm-ui-form-prompt)
+               (lambda (prompt &rest args)
+                 (push prompt prompts)
+                 (if (plist-get args :validate)
+                     (progn
+                       (should (stringp (funcall (plist-get args :validate) "wrong")))
+                       (should-not (funcall (plist-get args :validate) "secret"))
+                       "secret")
+                   "secret"))))
+      (should (equal (lispm-ui--intercept-read-passwd #'ignore "Password: " t) "secret"))
+      (should (= (length prompts) 2)))))
 
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

@@ -167,21 +167,22 @@ button rose over the control, which is then chosen.  Escape or C-g gives
 up."
   (let ((in t) (chosen nil))
     (funcall draw t)
-    (track-mouse
-      (catch 'done
-        (while t
-          (let ((event (lispm-ui-modal-read)))
-            (cond ((lispm-ui-modal-cancel-p event) (throw 'done nil))
-                  ((lispm-ui-modal-mouse-up-p event)
-                   (setq chosen (and (funcall over-p event) t))
-                   (throw 'done nil))
-                  ((mouse-movement-p event)
-                   (let ((over (and (funcall over-p event) t)))
-                     (unless (eq over in)
-                       (setq in over)
-                       (funcall draw over)))))))))
-    (when in
-      (funcall draw nil))
+    (unwind-protect
+        (track-mouse
+          (catch 'done
+            (while t
+              (let ((event (lispm-ui-modal-read)))
+                (cond ((lispm-ui-modal-cancel-p event) (throw 'done nil))
+                      ((lispm-ui-modal-mouse-up-p event)
+                       (setq chosen (and (funcall over-p event) t))
+                       (throw 'done nil))
+                      ((mouse-movement-p event)
+                       (let ((over (and (funcall over-p event) t)))
+                         (unless (eq over in)
+                           (setq in over)
+                           (funcall draw over)))))))))
+      (when in
+        (funcall draw nil)))
     chosen))
 
 (defun lispm-ui-modal-moved-p (delta &optional cells)

@@ -163,6 +163,7 @@ minibuffer after LABEL."
 ;;;; Files
 
 (autoload 'lispm-ui-file-dialog "lispm-ui-file-dialog")
+(autoload 'lispm-ui-choose-remember "lispm-ui-file-dialog")
 
 (defvar lispm-ui-choose-file-function #'lispm-ui-file-dialog
   "Function showing files to choose one of, as a dialog does, or nil for
@@ -188,6 +189,8 @@ the system's own panel."
              (expand-file-name chosen)))
     (quit nil)))
 
+(defalias 'lispm-ui-choose-file-in-minibuffer #'lispm-ui--choose-file-in-minibuffer)
+
 (cl-defun lispm-ui-choose-file (&key title file directory predicate preview)
   "Show files to choose one of; return the file chosen, or nil.
 TITLE says what is chosen, by default \"Choose a File\".  It starts at
@@ -204,6 +207,8 @@ else read in the minibuffer, never in the system's own panel."
       (lispm-ui--choose-file-in-minibuffer title file directory predicate))))
 
 ;;;; Intercepting GUI prompts
+
+(defvaralias 'lispm-ui-intercepting 'lispm-ui--intercepting)
 
 (defvar lispm-ui--intercepting nil
   "Non-nil while an intercepted prompt is already showing a dialog.")
@@ -276,7 +281,16 @@ else read in the minibuffer, never in the system's own panel."
            (lispm-ui-popup-available-p))
       (let ((lispm-ui--intercepting t)
             (lispm-ui-in-gui-action t))
-        (lispm-ui-form-prompt prompt :default default :password t))
+        (if (not confirm)
+            (lispm-ui-form-prompt prompt :default default :password t)
+          (let ((first (lispm-ui-form-prompt prompt :default default :password t)))
+            (lispm-ui-form-prompt
+             prompt :default default :password t
+             :validate (lambda (val)
+                         (unless (equal (or val default "") first)
+                           (lispm-ui-tr "%s: fill this in"
+                                        (lispm-ui--clean-prompt prompt)))))
+            first)))
     (funcall orig-fn prompt confirm default)))
 
 (defun lispm-ui--intercept-read-number (orig-fn prompt &optional default hist)
@@ -399,10 +413,13 @@ else read in the minibuffer, never in the system's own panel."
            :default def-val
            :choices (and (<= count 60) candidates)
            :require-match (and require-match (<= count 60) (> count 0) t)
-           :validate (and require-match (> count 60)
+           :validate (and require-match
                           (lambda (val)
                             (let ((s (or val def-val "")))
-                              (unless (test-completion s collection predicate)
+                              (unless (or (and (not (eq require-match t))
+                                               (string-empty-p s))
+                                          (test-completion s collection predicate)
+                                          (member s candidates))
                                 (lispm-ui-tr "%s: fill this in"
                                              (lispm-ui--clean-prompt prompt))))))))))
     (funcall orig-fn prompt collection predicate require-match
@@ -419,11 +436,14 @@ else read in the minibuffer, never in the system's own panel."
              (lispm-ui-in-gui-action t)
              (title (lispm-ui--clean-prompt prompt (lispm-ui-tr "Choose a File")))
              (directory (or dir default-directory)))
-        (if (and (null mustmatch) (stringp initial) (not (string-empty-p initial))
+        (if (and (null mustmatch)
                  (not (eq predicate #'file-directory-p)))
             (lispm-ui-form-prompt
              title
-             :initial (if dir (expand-file-name initial dir) initial)
+             :initial (cond ((and (stringp initial) (not (string-empty-p initial)))
+                             (if dir (expand-file-name initial dir) initial))
+                            ((stringp dir) (abbreviate-file-name dir))
+                            (t (abbreviate-file-name default-directory)))
              :default (if (consp default-filename) (car default-filename) default-filename))
           (let ((chosen (lispm-ui-choose-file
                          :title title

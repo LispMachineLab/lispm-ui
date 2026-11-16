@@ -312,6 +312,60 @@ else read in the minibuffer, never in the system's own panel."
    (t
     (ignore-errors (all-completions "" collection predicate)))))
 
+(declare-function project-known-project-roots "project" ())
+
+(defun lispm-ui--existing-directories (dirs &optional max-count)
+  "Return up to MAX-COUNT existing directory paths from DIRS, abbreviated."
+  (let ((limit (or max-count 16))
+        (result nil))
+    (catch 'done
+      (dolist (dir dirs)
+        (when (and (stringp dir)
+                   (not (equal dir "... (choose a dir)"))
+                   (file-directory-p dir))
+          (let ((abbr (abbreviate-file-name
+                       (file-name-as-directory (expand-file-name dir)))))
+            (unless (member abbr result)
+              (push abbr result)
+              (when (>= (length result) limit)
+                (throw 'done nil)))))))
+    (nreverse result)))
+
+(defun lispm-ui--prompt-project-directory (prompt &optional candidates initial)
+  "Open a modal form for PROMPT with existing CANDIDATES and a `Choose…' button."
+  (let* ((base-dir (file-name-as-directory (expand-file-name default-directory)))
+         (dirs (lispm-ui--existing-directories
+                (or candidates
+                    (and (fboundp 'project-known-project-roots)
+                         (ignore-errors (project-known-project-roots))))
+                16))
+         (init (or (and (stringp initial) (not (string-empty-p initial)) initial)
+                   (car dirs)
+                   (abbreviate-file-name base-dir)))
+         (clean (lispm-ui--clean-prompt prompt))
+         (chosen (lispm-ui-form-prompt
+                  prompt
+                  :initial init
+                  :choices dirs
+                  :choose-directory t
+                  :validate (lambda (val)
+                              (let ((dir (and (stringp val)
+                                              (not (string-empty-p (string-trim val)))
+                                              (expand-file-name (string-trim val) base-dir))))
+                                (unless (and dir (file-directory-p dir))
+                                  (lispm-ui-tr "%s: fill this in" clean)))))))
+    (file-name-as-directory (expand-file-name (string-trim chosen) base-dir))))
+
+(defun lispm-ui--intercept-project-prompt-project-dir (orig-fn &rest args)
+  "Route `project-prompt-project-dir' to a modal form with a `Choose…' button."
+  (if (and (not lispm-ui--intercepting)
+           (lispm-ui-gui-action-p)
+           (lispm-ui-popup-available-p))
+      (let ((lispm-ui--intercepting t)
+            (lispm-ui-in-gui-action t))
+        (lispm-ui--prompt-project-directory "Select project"))
+    (apply orig-fn args)))
+
 (defun lispm-ui--intercept-completing-read (orig-fn prompt collection
                                                     &optional predicate require-match
                                                     initial-input hist def
@@ -327,14 +381,18 @@ else read in the minibuffer, never in the system's own panel."
              (def-val (if (consp def) (car def) def))
              (candidates (lispm-ui--completion-candidates collection predicate))
              (count (length candidates)))
-        (if (and require-match (>= count 1) (<= count 30))
-            (let ((chosen (lispm-ui-choose (mapcar (lambda (c) (cons c c)) candidates)
-                                           (or def-val init)
-                                           nil
-                                           (lispm-ui--clean-prompt prompt))))
-              (if chosen
-                  (car chosen)
-                (signal 'quit nil)))
+        (cond
+         ((member "... (choose a dir)" candidates)
+          (lispm-ui--prompt-project-directory prompt candidates (or init def-val)))
+         ((and require-match (>= count 1) (<= count 30))
+          (let ((chosen (lispm-ui-choose (mapcar (lambda (c) (cons c c)) candidates)
+                                         (or def-val init)
+                                         nil
+                                         (lispm-ui--clean-prompt prompt))))
+            (if chosen
+                (car chosen)
+              (signal 'quit nil))))
+         (t
           (lispm-ui-form-prompt
            prompt
            :initial init
@@ -346,7 +404,7 @@ else read in the minibuffer, never in the system's own panel."
                             (let ((s (or val def-val "")))
                               (unless (test-completion s collection predicate)
                                 (lispm-ui-tr "%s: fill this in"
-                                             (lispm-ui--clean-prompt prompt)))))))))
+                                             (lispm-ui--clean-prompt prompt))))))))))
     (funcall orig-fn prompt collection predicate require-match
              initial-input hist def inherit-input-method)))
 
@@ -400,6 +458,7 @@ else read in the minibuffer, never in the system's own panel."
     (read-passwd . lispm-ui--intercept-read-passwd)
     (read-number . lispm-ui--intercept-read-number)
     (completing-read . lispm-ui--intercept-completing-read)
+    (project-prompt-project-dir . lispm-ui--intercept-project-prompt-project-dir)
     (read-file-name . lispm-ui--intercept-read-file-name)
     (read-directory-name . lispm-ui--intercept-read-directory-name))
   "Functions intercepted when a GUI action asks a person.")

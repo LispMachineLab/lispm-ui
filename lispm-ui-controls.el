@@ -921,6 +921,73 @@ Controls carry their images as the text properties `lispm-ui-plain' and
         (lispm-ui--swap-image here (get-text-property here 'lispm-ui-focused)))
       (setq lispm-ui-focus here))))
 
+(defvar lispm-ui-target-properties '(lispm-ui-target)
+  "Text properties naming a press target in a window's bars, as
+`lispm-ui-press' reads them.")
+
+(defun lispm-ui-press-target (position)
+  "Return the press target at mouse POSITION, or nil.
+A target is named by one of `lispm-ui-target-properties' on the string
+at POSITION."
+  (when-let* ((string (posn-string position))
+              ((stringp (car string)))
+              (index (cdr string))
+              ((and (integerp index) (<= 0 index) (< index (length (car string))))))
+    (seq-some (lambda (prop)
+                (get-text-property index prop (car string)))
+              lispm-ui-target-properties)))
+
+(defun lispm-ui-same-target-p (position)
+  "Return a predicate true of mouse positions on the same target as POSITION."
+  (let ((window (posn-window position))
+        (area (posn-area position))
+        (target (lispm-ui-press-target position)))
+    (lambda (release)
+      (and target
+           (eq (posn-window release) window)
+           (eq (posn-area release) area)
+           (equal (lispm-ui-press-target release) target)))))
+
+(defun lispm-ui-pressed-p (target &optional window)
+  "Return non-nil while TARGET is held down in WINDOW.
+WINDOW defaults to the selected window."
+  (and target
+       (equal (window-parameter (or window (selected-window)) 'lispm-ui-pressed) target)))
+
+(defun lispm-ui-press (position pressed-p command &optional target)
+  "Hold a control at POSITION pressed until the mouse button rises.
+While the mouse is over the control (where PRESSED-P accepts the mouse
+event's position), the window parameter `lispm-ui-pressed' holds TARGET
+\(by default `lispm-ui-press-target' at POSITION) so the control is drawn
+pushed in; moving off draws it out again.  When the button rises over the
+control, COMMAND is called with no arguments in POSITION's window."
+  (let ((window (posn-window position))
+        (target (or target (lispm-ui-press-target position)))
+        (holding t))
+    (when (window-live-p window)
+      (when (unwind-protect
+                (lispm-ui-modal-hold
+                 (lambda (event)
+                   (let ((over (and (window-live-p window)
+                                    (funcall pressed-p (event-end event)))))
+                     (when (lispm-ui-modal-mouse-up-p event)
+                       (setq holding nil))
+                     over))
+                 (lambda (in)
+                   (when (and holding (window-live-p window))
+                     (set-window-parameter window 'lispm-ui-pressed (and in target))
+                     (with-current-buffer (window-buffer window)
+                       (force-mode-line-update))
+                     (redisplay t))))
+              (when (window-live-p window)
+                (set-window-parameter window 'lispm-ui-pressed nil)
+                (with-current-buffer (window-buffer window)
+                  (force-mode-line-update))))
+        (when (window-live-p window)
+          (let ((lispm-ui-in-gui-action t))
+            (with-selected-window window
+              (funcall command))))))))
+
 (defun lispm-ui--press-at (position)
   "Draw the push button at POSITION pushed in, until it is let go.
 From the mouse, it is let go when the button rises, and pressed only if
@@ -928,15 +995,22 @@ it rises over the push button, as on Mac OS 9; from the keyboard, it
 blinks.  Return non-nil when the button was pressed."
   (let ((pressed (get-text-property position 'lispm-ui-pressed))
         (shown (get-text-property position 'display)))
-    (lispm-ui--swap-image position pressed)
-    (redisplay t)
-    (prog1 (if (not (mouse-event-p last-input-event))
-               (progn (sit-for (alist-get 'button lispm-ui-modal-flashes)) t)
-             (let ((release (let ((echo-keystrokes 0)) (lispm-ui-modal-read-event))))
-               (and (mouse-event-p release)
-                    (eq (posn-window (event-end release)) (posn-window (event-start last-input-event)))
-                    (eql (posn-point (event-end release)) position))))
-      (lispm-ui--swap-image position shown))))
+    (if (not (mouse-event-p last-input-event))
+        (progn
+          (lispm-ui--swap-image position pressed)
+          (redisplay t)
+          (sit-for (alist-get 'button lispm-ui-modal-flashes))
+          (lispm-ui--swap-image position shown)
+          t)
+      (let ((window (posn-window (event-start last-input-event))))
+        (lispm-ui-modal-hold
+         (lambda (event)
+           (let ((end (event-end event)))
+             (and (eq (posn-window end) window)
+                  (eql (posn-point end) position))))
+         (lambda (in)
+           (lispm-ui--swap-image position (if in pressed shown))
+           (redisplay t)))))))
 
 (defun lispm-ui-push (&optional position)
   "Press the push button at POSITION, by default point's, as Return and
@@ -962,7 +1036,8 @@ Space do, or as a press of the mouse does; other buttons are pushed as
   "RET" #'lispm-ui-push
   "SPC" #'lispm-ui-push
   "<down-mouse-1>" #'lispm-ui--mouse-push
-  "<mouse-1>" #'ignore)
+  "<mouse-1>" #'ignore
+  "<drag-mouse-1>" #'ignore)
 
 (defun lispm-ui-image-of (control)
   "Return the image CONTROL, a string displaying one, shows."

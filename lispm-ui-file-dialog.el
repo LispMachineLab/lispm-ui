@@ -120,7 +120,7 @@ or all of them for nil; those whose names start with a dot are hidden,
 as Finder hid them."
   (let ((items nil))
     (dolist (entry (ignore-errors (directory-files-and-attributes directory nil "\\`[^.]" t)))
-      (let* ((file (expand-file-name (car entry) directory))
+      (let* ((file (expand-file-name (concat "./" (car entry)) directory))
              (folder (file-directory-p file)))
         (when (or folder (null predicate) (funcall predicate file))
           (push (list (car entry) file folder (file-attribute-modification-time (cdr entry)))
@@ -244,6 +244,8 @@ for each that is there."
   "Put FILE first among the files chosen lately."
   (setq lispm-ui-choose-recent
         (seq-take (cons file (delete file lispm-ui-choose-recent)) lispm-ui-choose-recent-count)))
+
+(defalias 'lispm-ui-choose-remember #'lispm-ui-file-dialog--remember)
 
 (defun lispm-ui-file-dialog--date (time)
   "Return TIME as the list's Date Modified column shows it."

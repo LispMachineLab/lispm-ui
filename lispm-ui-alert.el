@@ -130,8 +130,11 @@ buttons standing apart come too close to the others, if any."
                    left (+ left width lispm-ui-alert-button-gap)))))
        buttons))
     (list :height (+ top lispm-ui-button-height 15)
-          ;; Those apart keep twice the gap between buttons from Cancel.
-          :overlap (if (> apart-end 0) (- (+ apart-end (* 2 lispm-ui-alert-button-gap)) right-start) 0)
+          ;; Those apart keep twice the gap between buttons from Cancel;
+          ;; even without any, the right-hand buttons must not pass x=16.
+          :overlap (if (> apart-end 0)
+                       (- (+ apart-end (* 2 lispm-ui-alert-button-gap)) right-start)
+                     (max 0 (- 16 right-start)))
           :message lines :detail details
           :buttons (seq-sort-by (lambda (button) (seq-position buttons (nth 1 button)
                                                                (lambda (b value) (equal (nth 1 b) value))))

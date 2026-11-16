@@ -179,17 +179,17 @@ cannot be shown, a blank."
 
 (defun lispm-ui--image-file-p (file)
   "Return non-nil when FILE matches `image-file-name-regexp'."
-  (let ((regexp (if (and lispm-ui--image-file-regexp
-                         (eq (car lispm-ui--image-file-regexp)
-                             (bound-and-true-p image-file-name-extensions))
-                         (eq (cadr lispm-ui--image-file-regexp)
-                             (bound-and-true-p image-file-name-regexps)))
-                    (cddr lispm-ui--image-file-regexp)
-                  (let ((r (image-file-name-regexp)))
-                    (setq lispm-ui--image-file-regexp
-                          (cons (bound-and-true-p image-file-name-extensions)
-                                (cons (bound-and-true-p image-file-name-regexps) r)))
-                    r))))
+  (let* ((exts (bound-and-true-p image-file-name-extensions))
+         (rxps (bound-and-true-p image-file-name-regexps))
+         (regexp (if (and lispm-ui--image-file-regexp
+                          (equal (car lispm-ui--image-file-regexp) exts)
+                          (equal (cadr lispm-ui--image-file-regexp) rxps))
+                     (cddr lispm-ui--image-file-regexp)
+                   (let ((r (image-file-name-regexp)))
+                     (setq lispm-ui--image-file-regexp
+                           (cons (copy-sequence exts)
+                                 (cons (copy-sequence rxps) r)))
+                     r))))
     (string-match-p regexp file)))
 
 (defun lispm-ui-file-icon-name (file)

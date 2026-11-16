@@ -559,10 +559,14 @@ without entering it."
                 (unless (under event)
                   (when (not noninteractive)
                     (while (let ((next (read-event nil nil 0.25)))
-                             (and next
-                                  (not (lispm-ui-modal-mouse-up-p next))
-                                  (or (mouse-movement-p next)
-                                      (eq (car-safe next) 'drag-mouse-1))))))
+                             (cond ((null next) nil)
+                                   ((lispm-ui-modal-mouse-up-p next) nil)
+                                   ((or (mouse-movement-p next)
+                                        (eq (car-safe next) 'drag-mouse-1))
+                                    t)
+                                   (t
+                                    (push next unread-command-events)
+                                    nil)))))
                   (throw 'done nil)))
                ((lispm-ui-modal-mouse-up-p event)
                 (when-let* ((level (under event))

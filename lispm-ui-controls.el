@@ -950,7 +950,8 @@ at POSITION."
 (defun lispm-ui-pressed-p (target &optional window)
   "Return non-nil while TARGET is held down in WINDOW.
 WINDOW defaults to the selected window."
-  (equal (window-parameter (or window (selected-window)) 'lispm-ui-pressed) target))
+  (and target
+       (equal (window-parameter (or window (selected-window)) 'lispm-ui-pressed) target)))
 
 (defun lispm-ui-press (position pressed-p command &optional target)
   "Hold a control at POSITION pressed until the mouse button rises.
@@ -958,7 +959,7 @@ While the mouse is over the control (where PRESSED-P accepts the mouse
 event's position), the window parameter `lispm-ui-pressed' holds TARGET
 \(by default `lispm-ui-press-target' at POSITION) so the control is drawn
 pushed in; moving off draws it out again.  When the button rises over the
-control, COMMAND is called with no arguments."
+control, COMMAND is called with no arguments in POSITION's window."
   (let ((window (posn-window position))
         (target (or target (lispm-ui-press-target position)))
         (holding t))
@@ -981,7 +982,10 @@ control, COMMAND is called with no arguments."
                 (with-current-buffer (window-buffer window)
                   (force-mode-line-update))))
         (let ((lispm-ui-in-gui-action t))
-          (funcall command))))))
+          (if (window-live-p window)
+              (with-selected-window window
+                (funcall command))
+            (funcall command)))))))
 
 (defun lispm-ui--press-at (position)
   "Draw the push button at POSITION pushed in, until it is let go.

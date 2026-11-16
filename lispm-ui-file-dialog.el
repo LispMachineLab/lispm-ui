@@ -772,6 +772,7 @@ cancelled; return the file, or nil."
                       (unless noninteractive
                         (while (and (setq next (lispm-ui-modal-read 0))
                                     (setq next-delta (lispm-ui-file-dialog--wheel-delta next))
+                                    (= (cl-signum next-delta) (cl-signum delta))
                                     (lispm-ui-modal-over next frame))
                           (setq delta (+ delta next-delta)
                                 next nil))

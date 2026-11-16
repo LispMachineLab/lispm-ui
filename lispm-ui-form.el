@@ -1184,42 +1184,56 @@ after each command in a form's buffer."
 mouse rises, and run its action when it rises over BUTTON, as Mac OS 9's
 controls do."
   (select-window window)
-  (let* ((overlay (widget-get button :button-overlay))
+  (let* ((buffer (window-buffer window))
+         (overlay (widget-get button :button-overlay))
          (start (and (overlayp overlay) (overlay-start overlay)))
-         (end (and (overlayp overlay) (overlay-end overlay)))
-         (control (and start (with-current-buffer (window-buffer window)
+         (control (and start (with-current-buffer buffer
                                (lispm-ui-form--control-at start))))
          (place (and (not widget-button-click-moves-point)
                      (lispm-ui-form--place)))
          (restored (when control
                      (pcase-let ((`(,_ ,_ ,plain ,focused ,_) control))
-                       (if (equal control (buffer-local-value 'lispm-ui-form--focus
-                                                              (window-buffer window)))
+                       (if (equal control (buffer-local-value 'lispm-ui-form--focus buffer))
                            focused
                          plain))))
          (pressed (nth 4 control))
+         (same-buffer-p
+          (lambda ()
+            (and (window-live-p window)
+                 (buffer-live-p buffer)
+                 (eq (window-buffer window) buffer))))
          (chosen
           (lispm-ui-modal-hold
            (lambda (ev)
              (let* ((pos (event-end ev))
                     (win (posn-window pos))
-                    (pt (posn-point pos)))
-               (and (eq win window)
+                    (pt (posn-point pos))
+                    (s (and (overlayp overlay) (eq (overlay-buffer overlay) buffer)
+                            (overlay-start overlay)))
+                    (e (and (overlayp overlay) (eq (overlay-buffer overlay) buffer)
+                            (overlay-end overlay))))
+               (and (funcall same-buffer-p)
+                    (eq win window)
                     (integerp pt)
-                    (or (and start end (<= start pt) (< pt end))
-                        (eq (with-current-buffer (window-buffer window)
+                    (or (and s e (<= s pt) (< pt e))
+                        (eq (with-current-buffer buffer
                               (get-char-property pt 'button))
                             button)))))
            (lambda (in)
-             (when (and control (buffer-live-p (window-buffer window)))
-               (with-current-buffer (window-buffer window)
-                 (when (<= end (point-max))
-                   (lispm-ui-form--show start end (if in pressed restored))))
+             (when (and control (funcall same-buffer-p)
+                        (overlayp overlay) (eq (overlay-buffer overlay) buffer))
+               (with-current-buffer buffer
+                 (let ((s (overlay-start overlay))
+                       (e (overlay-end overlay)))
+                   (when (and s e (<= e (point-max)))
+                     (lispm-ui-form--show s e (if in pressed restored)))))
                (redisplay t))))))
-    (when (and chosen (window-live-p window) (buffer-live-p (window-buffer window)))
+    (when (and chosen (funcall same-buffer-p))
       (with-selected-window window
         (when widget-button-click-moves-point
-          (goto-char (or start position)))
+          (goto-char (or (and (overlayp overlay) (eq (overlay-buffer overlay) buffer)
+                              (overlay-start overlay))
+                         position)))
         (let ((lispm-ui-in-gui-action t))
           (widget-apply-action button event))
         (when (and place (buffer-live-p (current-buffer)))

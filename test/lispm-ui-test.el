@@ -3323,7 +3323,10 @@ file dialogs, whereas native keyboard commands are not intercepted."
             (should (equal (read-directory-name "Folder: " "/tmp/") "/tmp/chosen"))
             (should (equal (car calls) '(file :title "Folder" :directory "/tmp/" :predicate file-directory-p)))
             (should (equal (read-file-name "Save: " nil nil nil "~/Console.txt") "~/Console.txt"))
-            (should (equal (car calls) '(form "Save" :initial "~/Console.txt" :default nil))))
+            (should (equal (car calls) '(form "Save" :initial "~/Console.txt" :default nil)))
+            (should (stringp (completing-read "Select project: " '("/tmp/" "... (choose a dir)") nil t)))
+            (should (eq (car (car calls)) 'form))
+            (should (plist-get (cddr (car calls)) :choose-directory)))
           ;; 2. Native keyboard operation (lispm-ui-in-gui-action = nil, key event) is NOT intercepted:
           (setq calls nil)
           (let ((lispm-ui-in-gui-action nil)

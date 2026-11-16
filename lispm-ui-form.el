@@ -1055,7 +1055,11 @@ of its face, framed once."
           ;; as nothing, even from its start, to the field's end, and
           ;; what is typed next goes there, after the blanks.
           (put-text-property shown end 'lispm-ui-form-padding t)
-          (put-text-property shown (1- end) 'invisible t)
+          (put-text-property shown
+                             (if (and (= shown start) (< shown (- end 2)))
+                                 (- end 2)
+                               (1- end))
+                             'invisible t)
           (put-text-property (1- end) end 'display `(space :align-to (,right))))))))
 
 (defun lispm-ui-form--field-window (widget start end point width)
@@ -1742,20 +1746,23 @@ REQUIRE-MATCH VALIDATE).")
           (set-window-configuration config))))))
 
 (cl-defun lispm-ui-form-prompt (prompt &key initial default password choices
-                                       require-match validate)
+                                       require-match validate choose-directory)
   "Ask PROMPT in a modal `lispm-ui-form' dialog and return the string entered.
 INITIAL is the initial text in the field; DEFAULT is returned when the
 field is submitted empty.  PASSWORD masks the input as stars.  CHOICES,
 a list of strings, offers a pop-up menu of presets above the field (or
 alone when REQUIRE-MATCH is non-nil).  VALIDATE, a function of the
 value returning an error string or nil, checks the value before
-submitting.  Cancelling signals `quit'."
+submitting.  When CHOOSE-DIRECTORY is non-nil, include a `Choose…'
+button that opens `lispm-ui-choose-file' for a folder.  Cancelling
+signals `quit'."
   (if lispm-ui-form-prompt-function
       (funcall lispm-ui-form-prompt-function prompt
                :initial initial :default default :password password
                :choices choices :require-match require-match :validate validate)
     (let* ((clean (replace-regexp-in-string "[ \t]*:?[ \t]*\\'" "" (or prompt "")))
            (title (if (string-empty-p clean) (lispm-ui-tr "Choose") clean))
+           (base-dir (file-name-as-directory (expand-file-name default-directory)))
            (choice-pairs (mapcar (lambda (c)
                                    (let ((text (format "%s" (if (consp c) (car c) c))))
                                      (cons text text)))
@@ -1769,8 +1776,53 @@ submitting.  Cancelling signals `quit'."
            (buffer nil)
            (cleanup nil)
            (depth (recursion-depth))
+           (browse-buttons
+            (when choose-directory
+              `((,(lispm-ui-tr "Choose…") .
+                 ,(lambda ()
+                    (when (buffer-live-p buffer)
+                      (let* ((current (with-current-buffer buffer
+                                        (or (lispm-ui-form-value :value) init-val)))
+                             (start (if (and (stringp current)
+                                             (not (string-empty-p (string-trim current))))
+                                        (expand-file-name (string-trim current) base-dir)
+                                      base-dir))
+                             (modal-frame (selected-frame))
+                             (chosen (condition-case nil
+                                         (unwind-protect
+                                             (lispm-ui-choose-file
+                                              :title title
+                                              :directory (if (file-directory-p start)
+                                                             (file-name-as-directory start)
+                                                           (file-name-as-directory (expand-file-name "~")))
+                                              :predicate #'file-directory-p)
+                                           (when (frame-live-p modal-frame)
+                                             (select-frame-set-input-focus modal-frame)))
+                                       (quit nil))))
+                        (when (and chosen (buffer-live-p buffer))
+                          (let ((abbr (abbreviate-file-name
+                                       (file-name-as-directory (expand-file-name chosen base-dir)))))
+                            (with-current-buffer buffer
+                              (if choice-pairs
+                                  (lispm-ui-form-set :value abbr
+                                                     :preset (and (assoc abbr choice-pairs) abbr))
+                                (lispm-ui-form-set :value abbr))))))))))))
            (fields
             (cond
+             (choose-directory
+              `((:value :type ,(if password 'password 'text) :label ,title
+                        :value ,init-val :submit t :validate ,validate)
+                ,@(if choice-pairs
+                      `((:preset :type choice :label ,(lispm-ui-tr "Choose")
+                                 :value ,(and (assoc init-val choice-pairs) init-val)
+                                 :choices ,choice-pairs
+                                 :buttons ,browse-buttons
+                                 :buttons-key :browse
+                                 :on-change ,(lambda (val)
+                                               (when (and val (buffer-live-p buffer))
+                                                 (with-current-buffer buffer
+                                                   (lispm-ui-form-set :value val))))))
+                    `((:browse :type buttons :buttons ,browse-buttons)))))
              ((and choice-pairs require-match)
               `((:value :type choice :label ,title
                         :value ,init-val

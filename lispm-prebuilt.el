@@ -539,28 +539,30 @@ callbacks waiting for it."
                     (delete-directory temporary t)
                     (lispm-prebuilt--finish name file why)))
           (message "Downloading %s…" (lispm-prebuilt--title name))
-          (funcall
-           lispm-prebuilt-fetch-function (plist-get plan :url) archive
-           (lambda (why)
-             (if why
-                 (done nil why)
-               (condition-case err
-                   (progn
-                     (lispm-prebuilt--checked name plan archive)
-                     (when (lispm-prebuilt--directory-p name)
-                       (make-directory (expand-file-name "unpacked" temporary)))
-                     (let ((command (lispm-prebuilt--unpack-command name archive))
-                           (default-directory temporary))
-                       (lispm-prebuilt-run
-                        (car command) (cdr command)
-                        (lambda (exit _said)
-                          (if (not (eql exit 0))
-                              (done nil (format "%s could not be unpacked" (plist-get plan :asset)))
-                            (condition-case err
-                                (done (lispm-prebuilt--install name plan archive) nil)
-                              (error (done nil (error-message-string err)))))))))
-                 (error (done nil (error-message-string err))))))
-           :timeout lispm-prebuilt-timeout))))))
+          (condition-case err
+              (funcall
+               lispm-prebuilt-fetch-function (plist-get plan :url) archive
+               (lambda (why)
+                 (if why
+                     (done nil why)
+                   (condition-case err
+                       (progn
+                         (lispm-prebuilt--checked name plan archive)
+                         (when (lispm-prebuilt--directory-p name)
+                           (make-directory (expand-file-name "unpacked" temporary)))
+                         (let ((command (lispm-prebuilt--unpack-command name archive))
+                               (default-directory temporary))
+                           (lispm-prebuilt-run
+                            (car command) (cdr command)
+                            (lambda (exit _said)
+                              (if (not (eql exit 0))
+                                  (done nil (format "%s could not be unpacked" (plist-get plan :asset)))
+                                (condition-case err
+                                    (done (lispm-prebuilt--install name plan archive) nil)
+                                  (error (done nil (error-message-string err)))))))))
+                     (error (done nil (error-message-string err))))))
+               :timeout lispm-prebuilt-timeout)
+            (error (done nil (error-message-string err)))))))))
 
 (defun lispm-prebuilt-get (name callback)
   "Get NAME's file, then call CALLBACK with it and nil, or with nil and a

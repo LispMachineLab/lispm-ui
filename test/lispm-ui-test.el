@@ -797,21 +797,28 @@ prefixes and pointer jitter, and runs its command on the first click."
 
 (ert-deftest lispm-ui-test-popup-in-buffer ()
   "A pop-up menu in a buffer asks with `lispm-ui-choose', its current
-choice checked, and gives its action the value chosen; nothing when
+choice checked, forwarding point from the keyboard or the mouse event
+from the pointer, and gives its action the value chosen; nothing when
 none is."
   (lispm-ui-test--with-controls
-    (let ((chosen nil) (asked nil) (answer '(blue)))
+    (let ((chosen nil)
+          (asked nil)
+          (answer '(blue))
+          (mouse-ev (list 'down-mouse-1 (list (selected-window) 1 '(12 . 8) 0))))
       (lispm-ui-insert-popup-button "Red" '((red . "Red") (blue . "Blue"))
                                     (lambda (value) (push value chosen))
                                     :current 'red :help "Colour")
       (goto-char (point-min))
       (should (eq (get-text-property (point) 'keymap) lispm-ui-push-button-map))
       (let ((lispm-ui-choose-function (lambda (&rest args) (push args asked) answer)))
-        (push-button)
+        (let ((last-input-event ?\r))
+          (push-button))
         (setq answer nil)
-        (push-button))
+        (let ((last-input-event mouse-ev))
+          (push-button)))
       (should (equal chosen '(blue)))
-      (should (equal (car asked) '(((red . "Red") (blue . "Blue")) red 1 "Colour"))))))
+      (should (equal (cadr asked) '(((red . "Red") (blue . "Blue")) red 1 "Colour")))
+      (should (equal (car asked) (list '((red . "Red") (blue . "Blue")) 'red mouse-ev "Colour"))))))
 
 (ert-deftest lispm-ui-test-controls-as-text ()
   "On a text terminal controls are text: a button between brackets, the
@@ -1504,9 +1511,13 @@ chosen; choices are read there too, as LispM UI reads them by default."
 (ert-deftest lispm-ui-test-choose-in-a-menu ()
   "Where a menu can be drawn, choices are its items, the current one
 checked, opened under the place they are chosen for; the item chosen
-gives its value, and child-frame offsets are translated to the top frame."
+gives its value, child-frame offsets are translated to the top or bound
+parent frame, top-clipped rows adjust their drop, and nil point
+positions fall back to the mouse position."
   (let ((offered nil)
-        (parent-saw nil))
+        (parent-saw nil)
+        (vis-result t)
+        (posn-result 'posn-42))
     (cl-letf (((symbol-function 'lispm-ui-popup-available-p) (lambda () t))
               ((symbol-function 'lispm-ui-menu-choose)
                (lambda (items &rest place)
@@ -1518,6 +1529,8 @@ gives its value, and child-frame offsets are translated to the top frame."
         (should (equal (car offered) '((:label "Small" :value small :checked t)
                                        (:label "Big" :value big :checked nil)))))
       (cl-letf (((symbol-function 'window-frame) (lambda (_w) 'inner-frame))
+                ((symbol-function 'framep) (lambda (f) (memq f '(inner-frame outer-frame screen-frame))))
+                ((symbol-function 'frame-live-p) (lambda (f) (memq f '(inner-frame outer-frame screen-frame))))
                 ((symbol-function 'frame-parent)
                  (lambda (f)
                    (pcase f
@@ -1530,14 +1543,39 @@ gives its value, and child-frame offsets are translated to the top frame."
                      ('outer-frame '(100 . 200))
                      (_ '(0 . 0)))))
                 ((symbol-function 'window-inside-pixel-edges) (lambda (_w) '(4 6 300 400)))
-                ((symbol-function 'pos-visible-in-window-p) (lambda (pt _w &optional _p) (eql pt 42)))
-                ((symbol-function 'posn-at-point) (lambda (pt _w) (and (eql pt 42) 'posn-42)))
-                ((symbol-function 'posn-x-y) (lambda (p) (and (eq p 'posn-42) '(15 . 30)))))
+                ((symbol-function 'pos-visible-in-window-p) (lambda (pt _w &optional _p) (and (eql pt 42) vis-result)))
+                ((symbol-function 'posn-at-point) (lambda (pt _w) (and (eql pt 42) posn-result)))
+                ((symbol-function 'posn-x-y)
+                 (lambda (p)
+                   (pcase p
+                     ('posn-42 '(15 . 30))
+                     (_ '(50 . 60))))))
         (with-temp-buffer
-          (lispm-ui-choose-default '((small . "Small") (big . "Big")) 'small 42)
-          (should (eq parent-saw 'screen-frame))
-          (should (equal (cdr offered) (list (+ 10 100 4 15)
-                                             (+ 24 200 6 30 lispm-ui-button-height))))))
+          ;; Unbound parent walks up to top-level screen-frame.
+          (let ((lispm-ui-menu-parent nil))
+            (lispm-ui-choose-default '((small . "Small") (big . "Big")) 'small 42)
+            (should (eq parent-saw 'screen-frame))
+            (should (equal (cdr offered) (list (+ 10 100 4 15)
+                                               (+ 24 200 6 30 lispm-ui-button-height)))))
+          ;; Explicitly bound ancestor frame still translates descendant offsets.
+          (let ((lispm-ui-menu-parent 'screen-frame))
+            (lispm-ui-choose-default '((small . "Small") (big . "Big")) 'small 42)
+            (should (eq parent-saw 'screen-frame))
+            (should (equal (cdr offered) (list (+ 10 100 4 15)
+                                               (+ 24 200 6 30 lispm-ui-button-height)))))
+          ;; Partially top-clipped row (rtop = 8) subtracts clipped pixels from button height.
+          (setq vis-result '(15 0 8 0 12 0))
+          (let ((lispm-ui-menu-parent nil))
+            (lispm-ui-choose-default '((small . "Small") (big . "Big")) 'small 42)
+            (should (equal (cdr offered) (list (+ 10 100 4 15)
+                                               (+ 24 200 6 30 (- lispm-ui-button-height 8))))))
+          ;; When posn-at-point returns nil despite non-nil visibility, fall back to mouse event start.
+          (setq posn-result nil)
+          (let ((lispm-ui-menu-parent nil)
+                (mouse-ev (list 'down-mouse-1 (list (selected-window) 42 '(50 . 60) 0))))
+            (lispm-ui-choose-default '((small . "Small") (big . "Big")) 'small mouse-ev)
+            (should (equal (cdr offered) (list (+ 10 100 4 50)
+                                               (+ 24 200 6 60)))))))
       (cl-letf (((symbol-function 'lispm-ui-menu-choose) #'ignore))
         (should-not (lispm-ui-choose-default '((small . "Small")) nil))))))
 

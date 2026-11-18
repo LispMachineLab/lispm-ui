@@ -638,20 +638,61 @@ Submenus are followed down, their items' labels joined with \" › \"."
 
 (defalias 'lispm-ui-menu-submenu #'lispm-ui-menu--submenu)
 
-(defun lispm-ui-menu--popup-target (frame)
-  "Return (PARENT DX . DY) for placing a popup of FRAME in its top-level parent."
-  (let ((parent (or lispm-ui-menu-parent frame))
+(defun lispm-ui-menu--parent-frame (frame)
+  "Return the parent frame of FRAME when FRAME is a live frame, or nil."
+  (and (framep frame) (frame-live-p frame) (frame-parent frame)))
+
+(defun lispm-ui-menu--popup-target (frame &optional target-parent)
+  "Return a plist (:parent FRAME :dx X :dy Y) translating FRAME to TARGET-PARENT.
+When TARGET-PARENT is nil, walk up to FRAME's top-level ancestor frame."
+  (let ((cur frame)
         (dx 0)
         (dy 0))
-    (unless lispm-ui-menu-parent
-      (let ((cur frame))
-        (while (and cur (ignore-errors (frame-parent cur)))
-          (let ((pos (frame-position cur)))
-            (setq dx (+ dx (car pos))
-                  dy (+ dy (cdr pos))
-                  cur (frame-parent cur))))
-        (setq parent cur)))
-    (cons parent (cons dx dy))))
+    (while (and cur
+                (not (eq cur target-parent))
+                (lispm-ui-menu--parent-frame cur))
+      (let ((pos (frame-position cur)))
+        (setq dx (+ dx (car pos))
+              dy (+ dy (cdr pos))
+              cur (lispm-ui-menu--parent-frame cur))))
+    (list :parent (or target-parent cur) :dx dx :dy dy)))
+
+(defun lispm-ui-menu--target-parent (target)
+  "Return the destination parent frame of popup TARGET."
+  (plist-get target :parent))
+
+(defun lispm-ui-menu--target-dx (target)
+  "Return the horizontal pixel offset of popup TARGET."
+  (plist-get target :dx))
+
+(defun lispm-ui-menu--target-dy (target)
+  "Return the vertical pixel offset of popup TARGET."
+  (plist-get target :dy))
+
+(defun lispm-ui-menu--clipped-top (visibility)
+  "Return the top-clipped pixel count from `pos-visible-in-window-p' VISIBILITY."
+  (if (and (consp visibility) (integerp (nth 2 visibility)))
+      (nth 2 visibility)
+    0))
+
+(defun lispm-ui-menu--choose-anchor (win position target)
+  "Return (:x X :y Y) in TARGET for opening a choice menu in WIN at POSITION."
+  (let* ((start (and (mouse-event-p position) (event-start position)))
+         (pt (cond (start (posn-point start))
+                   ((or (integerp position) (markerp position)) position)
+                   (t (with-selected-window win (point)))))
+         (vis (and (or (integerp pt) (markerp pt))
+                   (pos-visible-in-window-p pt win t)))
+         (glyph-posn (and vis (posn-at-point pt win)))
+         (posn (or glyph-posn start))
+         (xy (and posn (posn-x-y posn)))
+         (edges (window-inside-pixel-edges win))
+         (drop (if glyph-posn
+                   (max 0 (- lispm-ui-button-height (lispm-ui-menu--clipped-top vis)))
+                 0)))
+    (when xy
+      (list :x (+ (lispm-ui-menu--target-dx target) (car xy) (car edges))
+            :y (+ (lispm-ui-menu--target-dy target) (cdr xy) (cadr edges) drop)))))
 
 (defun lispm-ui-choose-default (choices &optional current position label)
   "Open a menu of CHOICES, a list of (VALUE . TEXT), at POSITION, by default
@@ -669,30 +710,15 @@ LABEL.  This is how `lispm-ui-choose' shows choices, unless
            (win (or (and start (windowp (posn-window start)) (posn-window start))
                     (selected-window)))
            (frame (or (and (window-live-p win) (window-frame win)) (selected-frame)))
-           (target (lispm-ui-menu--popup-target frame))
-           (lispm-ui-menu-parent (car target))
-           (dx (cadr target))
-           (dy (cddr target))
-           (pt (cond (start (posn-point start))
-                     ((or (integerp position) (markerp position)) position)
-                     (t (with-selected-window win (point)))))
-           (posn (cond ((and (or (integerp pt) (markerp pt))
-                             (pos-visible-in-window-p pt win t))
-                        (posn-at-point pt win))
-                       (start start)))
-           (xy (and posn (posn-x-y posn)))
-           (edges (window-inside-pixel-edges win))
+           (target (lispm-ui-menu--popup-target frame lispm-ui-menu-parent))
+           (anchor (lispm-ui-menu--choose-anchor win position target))
+           (lispm-ui-menu-parent (lispm-ui-menu--target-parent target))
            (item (lispm-ui-menu-choose
                   (mapcar (pcase-lambda (`(,value . ,text))
                             (list :label text :value value :checked (equal value current)))
                           choices)
-                  (and xy (+ dx (car xy) (car edges)))
-                  (and xy (+ dy (cdr xy) (cadr edges)
-                             (if (and start (not (eq posn (and (or (integerp pt) (markerp pt))
-                                                               (pos-visible-in-window-p pt win t)
-                                                               posn))))
-                                 0
-                               lispm-ui-button-height))))))
+                  (plist-get anchor :x)
+                  (plist-get anchor :y))))
       (and item (list (plist-get item :value))))))
 
 (provide 'lispm-ui-menu)

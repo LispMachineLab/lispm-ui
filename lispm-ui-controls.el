@@ -1102,9 +1102,9 @@ Space and the mouse open it, as they press a push button."
    nil
    (lambda ()
      (when-let* ((choice (lispm-ui-choose choices current
-                                          (or (and (mouse-event-p last-input-event)
-                                                   (posn-point (event-start last-input-event)))
-                                              (point))
+                                          (if (mouse-event-p last-input-event)
+                                              last-input-event
+                                            (point))
                                           (or help label))))
        (funcall action (car choice))))
    (or help label)

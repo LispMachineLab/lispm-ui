@@ -333,5 +333,36 @@ Return the asset's file."
           (insert-file-contents (lispm-prebuilt--spec name :sums))
           (should (search-forward "release module-VERSION" nil t)))))))
 
+(ert-deftest lispm-prebuilt-cleans-up-on-synchronous-fetch-error ()
+  "Verify `lispm-prebuilt--download-later' cleans up temp dir and notifies waiters
+when `lispm-prebuilt-fetch-function' signals an error synchronously."
+  (let ((lispm-prebuilt--waiting (make-hash-table :test #'eq))
+        (notified-file 'unset)
+        (notified-why nil)
+        (created-temps nil)
+        (orig-make-temp-file (symbol-function 'make-temp-file)))
+    (puthash 'fake (list (lambda (file why)
+                           (setq notified-file file
+                                 notified-why why)))
+             lispm-prebuilt--waiting)
+    (cl-letf (((symbol-function 'make-temp-file)
+               (lambda (prefix &optional dir-flag suffix text)
+                 (let ((path (funcall orig-make-temp-file prefix dir-flag suffix text)))
+                   (push path created-temps)
+                   path)))
+              ((symbol-function 'lispm-prebuilt--plan)
+               (lambda (_name) '(:asset "fake.tar.gz" :url "https://example.invalid/fake.tar.gz")))
+              ((symbol-function 'lispm-prebuilt--title)
+               (lambda (_name) "Fake"))
+              (lispm-prebuilt-fetch-function
+               (lambda (_url _dest _done &rest _)
+                 (error "Synchronous network failure"))))
+      (lispm-prebuilt--download-later 'fake)
+      (should-not notified-file)
+      (should (equal notified-why "Synchronous network failure"))
+      (should-not (gethash 'fake lispm-prebuilt--waiting))
+      (dolist (tmp created-temps)
+        (should-not (file-exists-p tmp))))))
+
 (provide 'lispm-prebuilt-test)
 ;;; lispm-prebuilt-test.el ends here

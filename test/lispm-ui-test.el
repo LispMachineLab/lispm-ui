@@ -3399,9 +3399,7 @@ confirm, `completing-read' `require-match', `~'-prefixed filenames, and
       (should (= (length prompts) 2)))))
 
 (ert-deftest lispm-ui-test-lisper-compliance-regressions ()
-  "Verify `lispm-ui-form-prompt' submission under mocked `recursive-edit' and
-`lispm-prebuilt--download-later' cleanup on synchronous fetch error."
-  ;; 1. `lispm-ui-form-prompt' preserves submitted value when `recursive-edit' returns normally:
+  "Verify `lispm-ui-form-prompt' submission under mocked `recursive-edit'."
   (let ((lispm-ui-current-palette (lispm-ui-test--classic-palette))
         (opened-buffer nil))
     (cl-letf (((symbol-function 'widget-image-find)
@@ -3412,35 +3410,7 @@ confirm, `completing-read' `require-match', `~'-prefixed filenames, and
                (lambda ()
                  (with-current-buffer opened-buffer
                    (lispm-ui-form-submit)))))
-      (should (equal (lispm-ui-form-prompt "Name:" :default "Alice") "Alice"))))
-  ;; 2. `lispm-prebuilt--download-later' cleans up temp dir and notifies waiters on synchronous error:
-  (let ((lispm-prebuilt--waiting (make-hash-table :test #'eq))
-        (notified-file 'unset)
-        (notified-why nil)
-        (created-temps nil)
-        (orig-make-temp-file (symbol-function 'make-temp-file)))
-    (puthash 'fake (list (lambda (file why)
-                           (setq notified-file file
-                                 notified-why why)))
-             lispm-prebuilt--waiting)
-    (cl-letf (((symbol-function 'make-temp-file)
-               (lambda (prefix &optional dir-flag suffix text)
-                 (let ((path (funcall orig-make-temp-file prefix dir-flag suffix text)))
-                   (push path created-temps)
-                   path)))
-              ((symbol-function 'lispm-prebuilt--plan)
-               (lambda (_name) '(:asset "fake.tar.gz" :url "https://example.invalid/fake.tar.gz")))
-              ((symbol-function 'lispm-prebuilt--title)
-               (lambda (_name) "Fake"))
-              (lispm-prebuilt-fetch-function
-               (lambda (_url _dest _done &rest _)
-                 (error "Synchronous network failure"))))
-      (lispm-prebuilt--download-later 'fake)
-      (should-not notified-file)
-      (should (equal notified-why "Synchronous network failure"))
-      (should-not (gethash 'fake lispm-prebuilt--waiting))
-      (dolist (tmp created-temps)
-        (should-not (file-exists-p tmp))))))
+      (should (equal (lispm-ui-form-prompt "Name:" :default "Alice") "Alice")))))
 
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

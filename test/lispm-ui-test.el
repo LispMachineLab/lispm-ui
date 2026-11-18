@@ -811,7 +811,7 @@ none is."
         (setq answer nil)
         (push-button))
       (should (equal chosen '(blue)))
-      (should (equal (car asked) '(((red . "Red") (blue . "Blue")) red nil "Colour"))))))
+      (should (equal (car asked) '(((red . "Red") (blue . "Blue")) red 1 "Colour"))))))
 
 (ert-deftest lispm-ui-test-controls-as-text ()
   "On a text terminal controls are text: a button between brackets, the
@@ -1504,15 +1504,40 @@ chosen; choices are read there too, as LispM UI reads them by default."
 (ert-deftest lispm-ui-test-choose-in-a-menu ()
   "Where a menu can be drawn, choices are its items, the current one
 checked, opened under the place they are chosen for; the item chosen
-gives its value."
-  (let ((offered nil))
+gives its value, and child-frame offsets are translated to the top frame."
+  (let ((offered nil)
+        (parent-saw nil))
     (cl-letf (((symbol-function 'lispm-ui-popup-available-p) (lambda () t))
               ((symbol-function 'lispm-ui-menu-choose)
-               (lambda (items &rest place) (setq offered (cons items place)) (nth 1 items))))
+               (lambda (items &rest place)
+                 (setq offered (cons items place)
+                       parent-saw lispm-ui-menu-parent)
+                 (nth 1 items))))
       (with-temp-buffer
         (should (equal (lispm-ui-choose-default '((small . "Small") (big . "Big")) 'small) '(big)))
         (should (equal (car offered) '((:label "Small" :value small :checked t)
                                        (:label "Big" :value big :checked nil)))))
+      (cl-letf (((symbol-function 'window-frame) (lambda (_w) 'inner-frame))
+                ((symbol-function 'frame-parent)
+                 (lambda (f)
+                   (pcase f
+                     ('inner-frame 'outer-frame)
+                     ('outer-frame 'screen-frame))))
+                ((symbol-function 'frame-position)
+                 (lambda (f)
+                   (pcase f
+                     ('inner-frame '(10 . 24))
+                     ('outer-frame '(100 . 200))
+                     (_ '(0 . 0)))))
+                ((symbol-function 'window-inside-pixel-edges) (lambda (_w) '(4 6 300 400)))
+                ((symbol-function 'pos-visible-in-window-p) (lambda (pt _w &optional _p) (eql pt 42)))
+                ((symbol-function 'posn-at-point) (lambda (pt _w) (and (eql pt 42) 'posn-42)))
+                ((symbol-function 'posn-x-y) (lambda (p) (and (eq p 'posn-42) '(15 . 30)))))
+        (with-temp-buffer
+          (lispm-ui-choose-default '((small . "Small") (big . "Big")) 'small 42)
+          (should (eq parent-saw 'screen-frame))
+          (should (equal (cdr offered) (list (+ 10 100 4 15)
+                                             (+ 24 200 6 30 lispm-ui-button-height))))))
       (cl-letf (((symbol-function 'lispm-ui-menu-choose) #'ignore))
         (should-not (lispm-ui-choose-default '((small . "Small")) nil))))))
 

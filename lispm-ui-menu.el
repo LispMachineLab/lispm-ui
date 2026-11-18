@@ -638,6 +638,21 @@ Submenus are followed down, their items' labels joined with \" › \"."
 
 (defalias 'lispm-ui-menu-submenu #'lispm-ui-menu--submenu)
 
+(defun lispm-ui-menu--popup-target (frame)
+  "Return (PARENT DX . DY) for placing a popup of FRAME in its top-level parent."
+  (let ((parent (or lispm-ui-menu-parent frame))
+        (dx 0)
+        (dy 0))
+    (unless lispm-ui-menu-parent
+      (let ((cur frame))
+        (while (and cur (ignore-errors (frame-parent cur)))
+          (let ((pos (frame-position cur)))
+            (setq dx (+ dx (car pos))
+                  dy (+ dy (cdr pos))
+                  cur (frame-parent cur))))
+        (setq parent cur)))
+    (cons parent (cons dx dy))))
+
 (defun lispm-ui-choose-default (choices &optional current position label)
   "Open a menu of CHOICES, a list of (VALUE . TEXT), at POSITION, by default
 point, CURRENT's item checked; return (VALUE) of the item chosen, or nil.
@@ -653,21 +668,31 @@ LABEL.  This is how `lispm-ui-choose' shows choices, unless
     (let* ((start (and (mouse-event-p position) (event-start position)))
            (win (or (and start (windowp (posn-window start)) (posn-window start))
                     (selected-window)))
+           (frame (or (and (window-live-p win) (window-frame win)) (selected-frame)))
+           (target (lispm-ui-menu--popup-target frame))
+           (lispm-ui-menu-parent (car target))
+           (dx (cadr target))
+           (dy (cddr target))
            (pt (cond (start (posn-point start))
                      ((or (integerp position) (markerp position)) position)
                      (t (with-selected-window win (point)))))
-           (xy (cond (start (posn-x-y start))
-                     ((and (or (integerp pt) (markerp pt))
-                           (pos-visible-in-window-p pt win t))
-                      (posn-x-y (posn-at-point pt win)))))
+           (posn (cond ((and (or (integerp pt) (markerp pt))
+                             (pos-visible-in-window-p pt win t))
+                        (posn-at-point pt win))
+                       (start start)))
+           (xy (and posn (posn-x-y posn)))
            (edges (window-inside-pixel-edges win))
            (item (lispm-ui-menu-choose
                   (mapcar (pcase-lambda (`(,value . ,text))
                             (list :label text :value value :checked (equal value current)))
                           choices)
-                  (and xy (+ (car xy) (car edges)))
-                  (and xy (+ (cdr xy) (cadr edges)
-                             (if start 0 lispm-ui-button-height))))))
+                  (and xy (+ dx (car xy) (car edges)))
+                  (and xy (+ dy (cdr xy) (cadr edges)
+                             (if (and start (not (eq posn (and (or (integerp pt) (markerp pt))
+                                                               (pos-visible-in-window-p pt win t)
+                                                               posn))))
+                                 0
+                               lispm-ui-button-height))))))
       (and item (list (plist-get item :value))))))
 
 (provide 'lispm-ui-menu)

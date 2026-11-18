@@ -457,6 +457,72 @@ Nothing is run; nil means the menu was cancelled, or had no items."
         (dolist (level levels)
           (lispm-ui-popup-dispose (plist-get level :frame)))))))
 
+(defun lispm-ui-menu--coalesce-mouse-move (event)
+  "Consume queued mouse-movement events and return the latest movement EVENT."
+  (while (and (not noninteractive)
+              (input-pending-p)
+              (let ((next (read-event nil nil 0)))
+                (if (mouse-movement-p next)
+                    (progn (setq event next) t)
+                  (when next
+                    (push next unread-command-events))
+                  nil))))
+  event)
+
+(defun lispm-ui-menu--drain-outside-drag ()
+  "Consume drag and movement events after an outside mouse-down until release."
+  (when (not noninteractive)
+    (track-mouse
+      (while (let ((next (lispm-ui-modal-read)))
+               (cond ((or (null next)
+                          (lispm-ui-modal-mouse-up-p next)
+                          (lispm-ui-modal-cancel-p next))
+                      nil)
+                     ((or (mouse-movement-p next)
+                          (eq (car-safe next) 'drag-mouse-1)
+                          (memq next lispm-ui-modal-areas))
+                      t)
+                     (t
+                      (push next unread-command-events)
+                      nil)))))))
+
+(defun lispm-ui-menu--close-deeper-levels (level get set)
+  "Close and dispose every open menu level deeper than LEVEL."
+  (let ((open (funcall get)))
+    (while (and open (not (eq (car open) level)))
+      (lispm-ui-popup-dispose (plist-get (car open) :frame))
+      (setq open (cdr open)))
+    (funcall set open)))
+
+(defun lispm-ui-menu--child-level (level levels)
+  "Return the submenu level opened from LEVEL's highlighted item in LEVELS, or nil."
+  (let ((open levels) (found nil))
+    (while (and open (cdr open))
+      (when (eq (cadr open) level) (setq found (car open)))
+      (setq open (cdr open)))
+    found))
+
+(defun lispm-ui-menu--flash-chosen (level index redraw-fn)
+  "Blink menu item INDEX of LEVEL once before returning."
+  (lispm-ui-modal-flash 'menu-item
+                        (lambda () (plist-put level :highlight nil) (funcall redraw-fn level))
+                        (lambda () (plist-put level :highlight index) (funcall redraw-fn level)))
+  (sit-for (alist-get 'menu-item lispm-ui-modal-flashes)))
+
+(defun lispm-ui-menu--highlight-level (level index get set redraw-fn)
+  "Highlight item INDEX of LEVEL, closing deeper levels and opening any submenu."
+  (unless (eql (plist-get level :highlight) index)
+    (lispm-ui-menu--close-deeper-levels level get set)
+    (plist-put level :highlight index)
+    (funcall redraw-fn level)
+    (let ((item (and index (nth index (plist-get level :items)))))
+      (when-let* ((submenu (and item (lispm-ui-menu--submenu item))))
+        (funcall set (cons (apply #'lispm-ui-menu--level submenu
+                                  (lispm-ui-menu--submenu-place
+                                   level index submenu
+                                   (frame-pixel-width (or lispm-ui-menu-parent (selected-frame)))))
+                           (funcall get)))))))
+
 (defun lispm-ui-menu--loop (get set)
   "Read events for the open menu levels until one item is chosen; return it.
 GET returns the levels, deepest first, and SET replaces them; a level
@@ -468,35 +534,12 @@ without entering it."
     (cl-labels
         ((levels () (funcall get))
          (redraw (level) (lispm-ui-menu--draw-level level) (redisplay t))
-         (close-to (level)
-           ;; Close every level deeper than LEVEL.
-           (let ((open (levels)))
-             (while (and open (not (eq (car open) level)))
-               (lispm-ui-popup-dispose (plist-get (car open) :frame))
-               (setq open (cdr open)))
-             (funcall set open)))
-         (highlight (level index)
-           (unless (eql (plist-get level :highlight) index)
-             (close-to level)
-             (plist-put level :highlight index)
-             (redraw level)
-             (let ((item (and index (nth index (plist-get level :items)))))
-               (when-let* ((submenu (and item (lispm-ui-menu--submenu item))))
-                 (funcall set (cons (apply #'lispm-ui-menu--level submenu
-                                           (lispm-ui-menu--submenu-place
-                                            level index submenu
-                                            (frame-pixel-width (or lispm-ui-menu-parent (selected-frame)))))
-                                    (levels)))))))
+         (close-to (level) (lispm-ui-menu--close-deeper-levels level get set))
+         (highlight (level index) (lispm-ui-menu--highlight-level level index get set #'redraw))
          (item (level)
            (when-let* ((index (plist-get level :highlight)))
              (nth index (plist-get level :items))))
-         (child (level)
-           ;; The level opened from LEVEL's highlighted item, if any.
-           (let ((open (levels)) (found nil))
-             (while (and open (cdr open))
-               (when (eq (cadr open) level) (setq found (car open)))
-               (setq open (cdr open)))
-             found))
+         (child (level) (lispm-ui-menu--child-level level (levels)))
          (enter (level)
            ;; Move the focus into the submenu LEVEL's item opened.
            (when-let* ((inner (child level)))
@@ -544,33 +587,13 @@ without entering it."
                         ((lispm-ui-menu--submenu chosen) (enter focus))
                         (t (throw 'done chosen)))))
                ((mouse-movement-p event)
-                (while (and (not noninteractive)
-                            (input-pending-p)
-                            (let ((next (read-event nil nil 0)))
-                              (if (mouse-movement-p next)
-                                  (progn (setq event next) t)
-                                (when next
-                                  (push next unread-command-events))
-                                nil))))
+                (setq event (lispm-ui-menu--coalesce-mouse-move event))
                 (when-let* ((level (under event)))
                   (setq focus level)
                   (highlight level (lispm-ui-menu--level-index event level))))
                ((lispm-ui-modal-mouse-down-p event)
                 (unless (under event)
-                  (when (not noninteractive)
-                    (track-mouse
-                      (while (let ((next (lispm-ui-modal-read)))
-                               (cond ((or (null next)
-                                          (lispm-ui-modal-mouse-up-p next)
-                                          (lispm-ui-modal-cancel-p next))
-                                      nil)
-                                     ((or (mouse-movement-p next)
-                                          (eq (car-safe next) 'drag-mouse-1)
-                                          (memq next lispm-ui-modal-areas))
-                                      t)
-                                     (t
-                                      (push next unread-command-events)
-                                      nil))))))
+                  (lispm-ui-menu--drain-outside-drag)
                   (throw 'done nil)))
                ((lispm-ui-modal-mouse-up-p event)
                 (when-let* ((level (under event))
@@ -578,10 +601,7 @@ without entering it."
                             (chosen (nth index (plist-get level :items))))
                   (unless (lispm-ui-menu--submenu chosen)
                     ;; As Mac OS 9 did, the chosen item blinks once.
-                    (lispm-ui-modal-flash 'menu-item
-                                          (lambda () (plist-put level :highlight nil) (redraw level))
-                                          (lambda () (plist-put level :highlight index) (redraw level)))
-                    (sit-for (alist-get 'menu-item lispm-ui-modal-flashes))
+                    (lispm-ui-menu--flash-chosen level index #'redraw)
                     (throw 'done chosen))))))))))))
 
 (defun lispm-ui-menu--run (item)

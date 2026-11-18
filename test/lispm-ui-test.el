@@ -3398,5 +3398,19 @@ confirm, `completing-read' `require-match', `~'-prefixed filenames, and
       (should (equal (lispm-ui--intercept-read-passwd #'ignore "Password: " t) "secret"))
       (should (= (length prompts) 2)))))
 
+(ert-deftest lispm-ui-test-lisper-compliance-regressions ()
+  "Verify `lispm-ui-form-prompt' submission under mocked `recursive-edit'."
+  (let ((lispm-ui-current-palette (lispm-ui-test--classic-palette))
+        (opened-buffer nil))
+    (cl-letf (((symbol-function 'widget-image-find)
+               (lambda (image) (and (eq (car-safe image) 'image) image)))
+              (lispm-ui-form-modal-show-function
+               (lambda (buffer) (setq opened-buffer buffer) nil))
+              ((symbol-function 'recursive-edit)
+               (lambda ()
+                 (with-current-buffer opened-buffer
+                   (lispm-ui-form-submit)))))
+      (should (equal (lispm-ui-form-prompt "Name:" :default "Alice") "Alice")))))
+
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

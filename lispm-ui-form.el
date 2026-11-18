@@ -750,6 +750,138 @@ one; of a form applying its changes at once, the one closing it, if any."
     (push (cons key widget) lispm-ui-form--widgets))
   widget)
 
+(defun lispm-ui-form--label-inserter (label)
+  "Return a once-only zero-argument thunk inserting LABEL flush-right."
+  (let ((labelled nil))
+    (lambda ()
+      ;; The label, flush right in its column, on the field's first row.
+      (unless labelled
+        (setq labelled t)
+        (when label
+          (let ((text (lispm-ui-form--label-text label)))
+            (insert (lispm-ui-form--at :label (lispm-ui-form--measure text)) text)))))))
+
+(defun lispm-ui-form--draw-text-field (key type props value label-fn row-fn)
+  "Insert a `text' or `password' field KEY with PROPS and VALUE."
+  (funcall
+   row-fn
+   (lambda ()
+     (funcall label-fn)
+     (insert (lispm-ui-form--at :control))
+     (lispm-ui-form--remember
+      key (widget-create (if (eq type 'password) 'lispm-ui-form-password 'editable-field)
+                         ;; Padded far, its padding drawn as one
+                         ;; blank to the fields' right edge: see
+                         ;; `lispm-ui-form--shape-field'.
+                         :size (max 200 (+ 32 (length (or value ""))))
+                         :format "%v"
+                         :value (or value "")
+                         :lispm-form-width (plist-get props :width)
+                         :action (if (plist-get props :submit)
+                                     (lambda (&rest _) (lispm-ui-form-submit))
+                                   (lambda (&rest _) (widget-forward 1)))
+                         :notify (lambda (widget &optional _child event)
+                                   ;; Told once it is changed, not before too.
+                                   (unless (eq (car-safe event) 'before-change)
+                                     (when (eq type 'password)
+                                       (lispm-ui-form--mask-password widget event))
+                                     (lispm-ui-form--one-line widget)
+                                     (lispm-ui-form--changed key (widget-value widget))
+                                     (lispm-ui-form--shape-field widget))))))))
+
+(defun lispm-ui-form--draw-text-area-field (key props value group label-fn)
+  "Insert a multi-line `text-area' field KEY with PROPS and VALUE in GROUP."
+  (let* ((lines (or (plist-get props :lines) 6))
+         (shown (string-trim-right (or value ""))))
+    ;; A panel framed a pixel wide: a thin line above, one below,
+    ;; and a side about each of its lines.
+    (lispm-ui-form--row group (lambda () (lispm-ui-form--area-rule)) t)
+    (let ((sides (lispm-ui-form--sides group)))
+      (when sides (insert (car sides)))
+      (funcall label-fn)
+      (insert (lispm-ui-form--at :control 1) (lispm-ui-form--edge))
+      (lispm-ui-form--remember
+       key (widget-create 'text
+                          :format "%v"
+                          :value-face 'lispm-ui-form-area
+                          ;; Its lines but the last end in a newline;
+                          ;; Emacs's widgets end that one, as they end
+                          ;; a text field of no fixed size.
+                          :value (concat shown (make-string (max 0 (- lines 1 (cl-count ?\n shown))) ?\n))
+                          :lispm-form-group group
+                          :notify (lambda (widget &optional _child event)
+                                    (unless (eq (car-safe event) 'before-change)
+                                      (lispm-ui-form--changed key (widget-value widget))
+                                      (lispm-ui-form--shape-area widget))))))
+    (lispm-ui-form--row group (lambda () (lispm-ui-form--area-rule)) t)))
+
+(defun lispm-ui-form--draw-picture-field (key label value label-fn row-fn)
+  "Insert a `picture' field KEY with LABEL and VALUE."
+  (funcall
+   row-fn
+   (lambda ()
+     (funcall label-fn)
+     (insert (lispm-ui-form--at :control))
+     (let ((glyph (lispm-ui-form--glyph 'picture nil value)))
+       (cond (glyph (insert-image glyph (if value (file-name-nondirectory value) " ")))
+             ((and value (display-graphic-p) (file-readable-p value))
+              (insert-image (create-image value nil nil :max-width 64 :max-height 64
+                                          :ascent 'center)
+                            (file-name-nondirectory value)))
+             (t (insert (propertize (if value (file-name-nondirectory value)
+                                      (lispm-ui-tr "No picture"))
+                                    'face 'lispm-ui-form-help)))))
+     (insert (propertize " " 'display `(space :width (,(plist-get lispm-ui-form--geometry :em)))))
+     (lispm-ui-form--remember
+      key (lispm-ui-form--button (lispm-ui-tr "Choose…")
+                                 (lambda ()
+                                   (when-let* ((file (lispm-ui-form--read-picture value label)))
+                                     (lispm-ui-form--changed key file t)))))
+     (when value
+       (insert " ")
+       (lispm-ui-form--button (lispm-ui-tr "Remove") (lambda () (lispm-ui-form--changed key nil t)))))))
+
+(defun lispm-ui-form--draw-rows-field (key field props start label-fn row-fn)
+  "Insert a `rows' field KEY with FIELD definition and PROPS at START."
+  (let ((rows (lispm-ui-form--rows field)))
+    (if rows
+        (let ((columns (or (lispm-ui-form--columns rows start)
+                           (list (plist-get lispm-ui-form--geometry start)))))
+          (dolist (each rows)
+            (funcall row-fn (lambda ()
+                              (funcall label-fn)
+                              (lispm-ui-form--draw-row key each columns)))
+            (when-let* ((help (plist-get each :help)))
+              (dolist (line (split-string help "\n"))
+                (funcall row-fn (lambda () (insert (lispm-ui-form--at start) (lispm-ui-form--help line start))))))))
+      (funcall row-fn (lambda ()
+                        (funcall label-fn)
+                        (insert (lispm-ui-form--at start)
+                                (lispm-ui-form--help (or (plist-get props :empty) "") start)))))))
+
+(defun lispm-ui-form--draw-choice-field (key field props label value label-fn row-fn)
+  "Insert a `choice' popup field KEY with FIELD definition, PROPS, and VALUE."
+  (let* ((choices (lispm-ui-form--choices field))
+         (shown (or (cdr (assoc value choices)) (lispm-ui-tr "Choose…"))))
+    (funcall
+     row-fn
+     (lambda ()
+       (funcall label-fn)
+       (insert (lispm-ui-form--at :control))
+       (lispm-ui-form--remember
+        key (widget-create 'push-button
+                           :tag (concat shown " ▾")
+                           :tag-glyph (lispm-ui-form--glyph 'popup nil shown)
+                           :lispm-form-control (list 'popup nil shown)
+                           :notify (lambda (_widget &optional _child event)
+                                     (when-let* ((choice (funcall lispm-ui-form-choose-function
+                                                                  (or label lispm-ui-form--title)
+                                                                  choices value event)))
+                                       (lispm-ui-form--changed key (car choice) t)))))
+       (when-let* ((buttons (plist-get props :buttons)))
+         (insert (propertize " " 'display `(space :width (,(plist-get lispm-ui-form--geometry :em)))))
+         (lispm-ui-form--insert-buttons (or (plist-get props :buttons-key) key) buttons))))))
+
 (defun lispm-ui-form--draw-field (field group)
   "Insert FIELD of the form, its label and its help, in GROUP's box if any."
   (pcase-let* ((`(,key . ,props) field)
@@ -758,64 +890,15 @@ one; of a form applying its changes at once, the one closing it, if any."
                (value (alist-get key lispm-ui-form--values))
                ;; Where its help starts, and a list without a label.
                (start (if (and (eq type 'rows) (not label)) :start :control))
-               (labelled nil))
-    (cl-flet ((label ()
-                ;; The label, flush right in its column, on the field's first row.
-                (unless labelled
-                  (setq labelled t)
-                  (when label
-                    (let ((text (lispm-ui-form--label-text label)))
-                      (insert (lispm-ui-form--at :label (lispm-ui-form--measure text)) text)))))
-              (row (insert) (lispm-ui-form--row group insert)))
+               (label-fn (lispm-ui-form--label-inserter label))
+               (row-fn (apply-partially #'lispm-ui-form--row group)))
+    (cl-flet ((label () (funcall label-fn))
+              (row (insert) (funcall row-fn insert)))
       (pcase type
         ((or 'text 'password)
-         (row (lambda ()
-                (label)
-                (insert (lispm-ui-form--at :control))
-                (lispm-ui-form--remember
-                 key (widget-create (if (eq type 'password) 'lispm-ui-form-password 'editable-field)
-                                    ;; Padded far, its padding drawn as one
-                                    ;; blank to the fields' right edge: see
-                                    ;; `lispm-ui-form--shape-field'.
-                                    :size (max 200 (+ 32 (length (or value ""))))
-                                    :format "%v"
-                                    :value (or value "")
-                                    :lispm-form-width (plist-get props :width)
-                                    :action (if (plist-get props :submit)
-                                                (lambda (&rest _) (lispm-ui-form-submit))
-                                              (lambda (&rest _) (widget-forward 1)))
-                                    :notify (lambda (widget &optional _child event)
-                                              ;; Told once it is changed, not before too.
-                                              (unless (eq (car-safe event) 'before-change)
-                                                (when (eq type 'password)
-                                                  (lispm-ui-form--mask-password widget event))
-                                                (lispm-ui-form--one-line widget)
-                                                (lispm-ui-form--changed key (widget-value widget))
-                                                (lispm-ui-form--shape-field widget))))))))
+         (lispm-ui-form--draw-text-field key type props value label-fn row-fn))
         ('text-area
-         (let* ((lines (or (plist-get props :lines) 6))
-                (shown (string-trim-right (or value ""))))
-           ;; A panel framed a pixel wide: a thin line above, one below,
-           ;; and a side about each of its lines.
-           (lispm-ui-form--row group (lambda () (lispm-ui-form--area-rule)) t)
-           (let ((sides (lispm-ui-form--sides group)))
-             (when sides (insert (car sides)))
-             (label)
-             (insert (lispm-ui-form--at :control 1) (lispm-ui-form--edge))
-             (lispm-ui-form--remember
-              key (widget-create 'text
-                                 :format "%v"
-                                 :value-face 'lispm-ui-form-area
-                                 ;; Its lines but the last end in a newline;
-                                 ;; Emacs's widgets end that one, as they end
-                                 ;; a text field of no fixed size.
-                                 :value (concat shown (make-string (max 0 (- lines 1 (cl-count ?\n shown))) ?\n))
-                                 :lispm-form-group group
-                                 :notify (lambda (widget &optional _child event)
-                                           (unless (eq (car-safe event) 'before-change)
-                                             (lispm-ui-form--changed key (widget-value widget))
-                                             (lispm-ui-form--shape-area widget))))))
-           (lispm-ui-form--row group (lambda () (lispm-ui-form--area-rule)) t)))
+         (lispm-ui-form--draw-text-area-field key props value group label-fn))
         ('check
          (row (lambda ()
                 (label)
@@ -848,67 +931,16 @@ one; of a form applying its changes at once, the one closing it, if any."
                                       :action (lambda (&rest _) (lispm-ui-form--changed key choice t))))
                   (insert " " text)))))
         ('choice
-         (let* ((choices (lispm-ui-form--choices field))
-                (shown (or (cdr (assoc value choices)) (lispm-ui-tr "Choose…"))))
-           (row (lambda ()
-                  (label)
-                  (insert (lispm-ui-form--at :control))
-                  (lispm-ui-form--remember
-                   key (widget-create 'push-button
-                                      :tag (concat shown " ▾")
-                                      :tag-glyph (lispm-ui-form--glyph 'popup nil shown)
-                                      :lispm-form-control (list 'popup nil shown)
-                                      :notify (lambda (_widget &optional _child event)
-                                                (when-let* ((choice (funcall lispm-ui-form-choose-function
-                                                                             (or label lispm-ui-form--title)
-                                                                             choices value event)))
-                                                  (lispm-ui-form--changed key (car choice) t)))))
-                  (when-let* ((buttons (plist-get props :buttons)))
-                    (insert (propertize " " 'display `(space :width (,(plist-get lispm-ui-form--geometry :em)))))
-                    (lispm-ui-form--insert-buttons (or (plist-get props :buttons-key) key) buttons))))))
+         (lispm-ui-form--draw-choice-field key field props label value label-fn row-fn))
         ('picture
-         (row (lambda ()
-                (label)
-                (insert (lispm-ui-form--at :control))
-                (let ((glyph (lispm-ui-form--glyph 'picture nil value)))
-                  (cond (glyph (insert-image glyph (if value (file-name-nondirectory value) " ")))
-                        ((and value (display-graphic-p) (file-readable-p value))
-                         (insert-image (create-image value nil nil :max-width 64 :max-height 64
-                                                     :ascent 'center)
-                                       (file-name-nondirectory value)))
-                        (t (insert (propertize (if value (file-name-nondirectory value)
-                                                 (lispm-ui-tr "No picture"))
-                                               'face 'lispm-ui-form-help)))))
-                (insert (propertize " " 'display `(space :width (,(plist-get lispm-ui-form--geometry :em)))))
-                (lispm-ui-form--remember
-                 key (lispm-ui-form--button (lispm-ui-tr "Choose…")
-                                         (lambda ()
-                                           (when-let* ((file (lispm-ui-form--read-picture value label)))
-                                             (lispm-ui-form--changed key file t)))))
-                (when value
-                  (insert " ")
-                  (lispm-ui-form--button (lispm-ui-tr "Remove") (lambda () (lispm-ui-form--changed key nil t)))))))
+         (lispm-ui-form--draw-picture-field key label value label-fn row-fn))
         ('buttons
          (row (lambda ()
                 (label)
                 (insert (lispm-ui-form--at :control))
                 (lispm-ui-form--insert-buttons key (plist-get props :buttons)))))
         ('rows
-         (let ((rows (lispm-ui-form--rows field)))
-           (if rows
-               (let ((columns (or (lispm-ui-form--columns rows start)
-                                  (list (plist-get lispm-ui-form--geometry start)))))
-                 (dolist (each rows)
-                   (row (lambda ()
-                          (label)
-                          (lispm-ui-form--draw-row key each columns)))
-                   (when-let* ((help (plist-get each :help)))
-                     (dolist (line (split-string help "\n"))
-                       (row (lambda () (insert (lispm-ui-form--at start) (lispm-ui-form--help line start))))))))
-             (row (lambda ()
-                    (label)
-                    (insert (lispm-ui-form--at start)
-                            (lispm-ui-form--help (or (plist-get props :empty) "") start)))))))
+         (lispm-ui-form--draw-rows-field key field props start label-fn row-fn))
         ('status
          ;; A line a row, the rows after the first under the first.
          (dolist (line (split-string (or value "") "\n"))
@@ -1760,6 +1792,81 @@ REQUIRE-MATCH VALIDATE).")
 
 (defalias 'lispm-ui-form-modal-show-default #'lispm-ui-form--modal-show-default)
 
+(defun lispm-ui-form--prompt-choose-dir (title start)
+  "Open `lispm-ui-choose-file' for a folder starting at START, preserving focus."
+  (let ((modal-frame (selected-frame)))
+    (condition-case nil
+        (unwind-protect
+            (lispm-ui-choose-file
+             :title title
+             :directory (if (file-directory-p start)
+                            (file-name-as-directory start)
+                          (file-name-as-directory (expand-file-name "~")))
+             :predicate #'file-directory-p)
+          (when (frame-live-p modal-frame)
+            (select-frame-set-input-focus modal-frame)))
+      (quit nil))))
+
+(defun lispm-ui-form--prompt-fields (title init-val password choice-pairs require-match validate choose-directory browse-buttons on-preset)
+  "Construct the field specification list for `lispm-ui-form-prompt'."
+  (let ((val-type (if password 'password 'text)))
+    (cond
+     (choose-directory
+      `((:value :type ,val-type :label ,title
+                :value ,init-val :submit t :validate ,validate)
+        ,@(if choice-pairs
+              `((:preset :type choice :label ,(lispm-ui-tr "Choose")
+                         :value ,(and (assoc init-val choice-pairs) init-val)
+                         :choices ,choice-pairs
+                         :buttons ,browse-buttons
+                         :buttons-key :browse
+                         :on-change ,on-preset))
+            `((:browse :type buttons :buttons ,browse-buttons)))))
+     ((and choice-pairs require-match)
+      `((:value :type choice :label ,title
+                :value ,init-val
+                :choices ,choice-pairs
+                :validate ,validate)))
+     (choice-pairs
+      `((:preset :type choice :label ,(lispm-ui-tr "Choose")
+                 :value ,(and (assoc init-val choice-pairs) init-val)
+                 :choices ,choice-pairs
+                 :on-change ,on-preset)
+        (:value :type ,val-type :label ,title
+                :value ,init-val :submit t :validate ,validate)))
+     (t
+      `((:value :type ,val-type :label ,title
+                :value ,init-val :submit t :validate ,validate))))))
+
+(defun lispm-ui-form--setup-modal-keymap ()
+  "Bind `keyboard-quit' and `ESC' to `lispm-ui-form-cancel' in a local keymap copy."
+  (use-local-map (copy-keymap (current-local-map)))
+  (local-set-key [remap keyboard-quit] #'lispm-ui-form-cancel)
+  (local-set-key (kbd "ESC") #'lispm-ui-form-cancel)
+  (local-set-key (kbd "<escape>") #'lispm-ui-form-cancel))
+
+(defun lispm-ui-form--prompt-browse-buttons (title init-val base-dir choice-pairs buffer-fn)
+  "Return the `Choose…' button spec for `lispm-ui-form-prompt'."
+  `((,(lispm-ui-tr "Choose…") .
+     ,(lambda ()
+        (let ((buffer (funcall buffer-fn)))
+          (when (buffer-live-p buffer)
+            (let* ((current (with-current-buffer buffer
+                              (or (lispm-ui-form-value :value) init-val)))
+                   (start (if (and (stringp current)
+                                   (not (string-empty-p (string-trim current))))
+                              (expand-file-name (string-trim current) base-dir)
+                            base-dir))
+                   (chosen (lispm-ui-form--prompt-choose-dir title start)))
+              (when (and chosen (buffer-live-p buffer))
+                (let ((abbr (abbreviate-file-name
+                             (file-name-as-directory (expand-file-name chosen base-dir)))))
+                  (with-current-buffer buffer
+                    (if choice-pairs
+                        (lispm-ui-form-set :value abbr
+                                           :preset (and (assoc abbr choice-pairs) abbr))
+                      (lispm-ui-form-set :value abbr))))))))))))
+
 (cl-defun lispm-ui-form-prompt (prompt &key initial default password choices
                                        require-match validate choose-directory)
   "Ask PROMPT in a modal `lispm-ui-form' dialog and return the string entered.
@@ -1792,100 +1899,40 @@ signals `quit'."
            (buffer nil)
            (cleanup nil)
            (depth (recursion-depth))
+           (exit-with (lambda (ok &optional val)
+                        (when (<= (recursion-depth) (1+ depth))
+                          (setq closing t
+                                submitted ok
+                                result val)
+                          (when (= (recursion-depth) (1+ depth))
+                            (exit-recursive-edit)))))
+           (on-preset (lambda (val)
+                        (when (and val (buffer-live-p buffer))
+                          (with-current-buffer buffer
+                            (lispm-ui-form-set :value val)))))
            (browse-buttons
             (when choose-directory
-              `((,(lispm-ui-tr "Choose…") .
-                 ,(lambda ()
-                    (when (buffer-live-p buffer)
-                      (let* ((current (with-current-buffer buffer
-                                        (or (lispm-ui-form-value :value) init-val)))
-                             (start (if (and (stringp current)
-                                             (not (string-empty-p (string-trim current))))
-                                        (expand-file-name (string-trim current) base-dir)
-                                      base-dir))
-                             (modal-frame (selected-frame))
-                             (chosen (condition-case nil
-                                         (unwind-protect
-                                             (lispm-ui-choose-file
-                                              :title title
-                                              :directory (if (file-directory-p start)
-                                                             (file-name-as-directory start)
-                                                           (file-name-as-directory (expand-file-name "~")))
-                                              :predicate #'file-directory-p)
-                                           (when (frame-live-p modal-frame)
-                                             (select-frame-set-input-focus modal-frame)))
-                                       (quit nil))))
-                        (when (and chosen (buffer-live-p buffer))
-                          (let ((abbr (abbreviate-file-name
-                                       (file-name-as-directory (expand-file-name chosen base-dir)))))
-                            (with-current-buffer buffer
-                              (if choice-pairs
-                                  (lispm-ui-form-set :value abbr
-                                                     :preset (and (assoc abbr choice-pairs) abbr))
-                                (lispm-ui-form-set :value abbr))))))))))))
-           (fields
-            (cond
-             (choose-directory
-              `((:value :type ,(if password 'password 'text) :label ,title
-                        :value ,init-val :submit t :validate ,validate)
-                ,@(if choice-pairs
-                      `((:preset :type choice :label ,(lispm-ui-tr "Choose")
-                                 :value ,(and (assoc init-val choice-pairs) init-val)
-                                 :choices ,choice-pairs
-                                 :buttons ,browse-buttons
-                                 :buttons-key :browse
-                                 :on-change ,(lambda (val)
-                                               (when (and val (buffer-live-p buffer))
-                                                 (with-current-buffer buffer
-                                                   (lispm-ui-form-set :value val))))))
-                    `((:browse :type buttons :buttons ,browse-buttons)))))
-             ((and choice-pairs require-match)
-              `((:value :type choice :label ,title
-                        :value ,init-val
-                        :choices ,choice-pairs
-                        :validate ,validate)))
-             (choice-pairs
-              `((:preset :type choice :label ,(lispm-ui-tr "Choose")
-                         :value ,(and (assoc init-val choice-pairs) init-val)
-                         :choices ,choice-pairs
-                         :on-change ,(lambda (val)
-                                       (when (and val (buffer-live-p buffer))
-                                         (with-current-buffer buffer
-                                           (lispm-ui-form-set :value val)))))
-                (:value :type ,(if password 'password 'text) :label ,title
-                        :value ,init-val :submit t :validate ,validate)))
-             (t
-              `((:value :type ,(if password 'password 'text) :label ,title
-                        :value ,init-val :submit t :validate ,validate))))))
+              (lispm-ui-form--prompt-browse-buttons
+               title init-val base-dir choice-pairs (lambda () buffer))))
+           (fields (lispm-ui-form--prompt-fields
+                    title init-val password choice-pairs require-match
+                    validate choose-directory browse-buttons on-preset)))
       (setq buffer
             (lispm-ui-form
              title fields
              :modal t
              :on-submit (lambda (values)
-                          (when (<= (recursion-depth) (1+ depth))
-                            (setq submitted t
-                                  result (or (alist-get :value values)
-                                             (and (stringp default) default)
-                                             ""))
-                            (when (= (recursion-depth) (1+ depth))
-                              (exit-recursive-edit))))
-             :on-cancel (lambda ()
-                          (when (<= (recursion-depth) (1+ depth))
-                            (setq submitted nil)
-                            (when (= (recursion-depth) (1+ depth))
-                              (exit-recursive-edit))))
-             :setup (lambda ()
-                      (use-local-map (copy-keymap (current-local-map)))
-                      (local-set-key [remap keyboard-quit] #'lispm-ui-form-cancel)
-                      (local-set-key (kbd "ESC") #'lispm-ui-form-cancel)
-                      (local-set-key (kbd "<escape>") #'lispm-ui-form-cancel))))
+                          (funcall exit-with t
+                                   (or (alist-get :value values)
+                                       (and (stringp default) default)
+                                       "")))
+             :on-cancel (apply-partially exit-with nil)
+             :setup #'lispm-ui-form--setup-modal-keymap))
       (with-current-buffer buffer
         (add-hook 'kill-buffer-hook
                   (lambda ()
                     (unless closing
-                      (setq submitted nil)
-                      (when (= (recursion-depth) (1+ depth))
-                        (exit-recursive-edit))))
+                      (funcall exit-with nil)))
                   nil t))
       (unwind-protect
           (progn

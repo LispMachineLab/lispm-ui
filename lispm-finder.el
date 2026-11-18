@@ -774,7 +774,7 @@ PROPS returns the text properties of an item, by name.  Return the columns."
 
 (defmacro lispm-finder--in (&rest body)
   "Run BODY in the active Finder buffer."
-  (declare (indent 0))
+  (declare (indent 0) (debug t))
   `(with-current-buffer (lispm-finder--buffer) ,@body))
 
 (defun lispm-finder-real-p ()

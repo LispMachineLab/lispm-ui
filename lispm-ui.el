@@ -4,8 +4,8 @@
 
 ;; Author: Ryan.K
 ;; URL: https://github.com/LispMachineLab/lispm-ui
-;; Version: 0.7.5
-;; Package-Requires: ((emacs "30.1") (lispm-kit "0.2.0"))
+;; Version: 0.8.0
+;; Package-Requires: ((emacs "30.1"))
 ;; Keywords: convenience, faces, mouse
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -79,6 +79,7 @@
 
 ;;; Code:
 
+(require 'lispm-kit)
 (require 'lispm-ui-base)
 (require 'lispm-ui-i18n)
 (require 'lispm-ui-palette)

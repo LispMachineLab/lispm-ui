@@ -7,4 +7,5 @@
 
 (:name "English (UK)"
  :messages
- ())
+ (("“%s” was moved to the Trash" . "“%s” was moved to the Wastebasket")
+  ("Move to Trash" . "Move to Wastebasket")))

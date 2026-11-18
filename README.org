@@ -30,8 +30,11 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-menu.el=    | menus, drawn as Mac OS 9 drew them, submenus beside their items; choices shown in one                                   |
 | =lispm-ui-file-dialog.el= | the dialog choosing a file: a folder's list, the usual places, the files chosen lately, a picture's preview       |
 | =lispm-ui-form.el=    | forms, written as data                                                                                                   |
+| =lispm-finder.el=     | the spatial 32×32 icon-grid file manager and modal file/folder chooser (=lispm-finder-i18n.el= its words)                |
+| =lispm-kit.el=        | an application's commands declared once (=lispm-kit-commands.el=) and its words in the language spoken (=lispm-kit-i18n.el=, =lispm-kit-i18n-check.el=) |
+| =lispm-prebuilt.el=   | native modules and programs of LispM's packages, downloaded, SHA-256 checked, and loaded                                 |
 
-=lispm-ui.el= loads every part.  More come as LispM's interface moves here.
+=lispm-ui.el= loads the UI and Kit parts; =lispm-finder= and =lispm-prebuilt= load when required.
 
 * Controls
 
@@ -185,20 +188,18 @@ program's words; LispM UI keeps only its catalogs, =i18n/=.  A program says its 
 * Installing it
 
 LispM installs it, and its App Store installs it before the applications that need it.
-Elsewhere, from git, after LispM Kit, which it requires:
+Elsewhere, from git:
 
 #+begin_src emacs-lisp
-(package-vc-install "https://github.com/LispMachineLab/lispm-kit")
 (package-vc-install "https://github.com/LispMachineLab/lispm-ui")
 #+end_src
 
-An application names it in its =Package-Requires=, as ~(lispm-ui "0.5.0")~, and requires the part
-it uses, or ~lispm-ui~ for all of them.
+An application names it in its =Package-Requires=, as ~(lispm-ui "0.8.0")~, and requires the part
+it uses (~lispm-ui~, ~lispm-kit~, ~lispm-finder~, or ~lispm-prebuilt~).
 
 * Testing
 
-=make test compile= runs the tests and byte-compiles the sources, warnings counted as errors,
-with a checkout of LispM Kit beside this one, or where =LISPM_KIT= says.
+=make test compile= runs the tests and byte-compiles the sources, warnings counted as errors.
 =make i18n= lists the messages each catalog lacks, and those it holds that the code no longer
 gives.  The palettes, drawings and lines LispM UI makes are those LispM's desktop made before
 they moved here, which =test/golden.eld= keeps: =make golden LISPM_DESKTOP=… LISPM_AGENT=…= writes

@@ -78,9 +78,10 @@ package; a desktop dresses LispM UI, never the reverse."
                                    (line-number-at-pos)))))))))
 
 (ert-deftest lispm-ui-test-requires-only-itself ()
-  "LispM UI requires no LispM package but LispM Kit, whose engine
-translates its words: each part requires Emacs's own libraries, parts of
-LispM UI and of LispM Kit, and the main file every part."
+  "LispM UI requires no LispM package but itself: each part requires
+Emacs's own libraries and parts of this repository (`lispm-ui',
+`lispm-kit', `lispm-finder', `lispm-prebuilt'), and the main file
+every `lispm-ui-*' part."
   (dolist (file (lispm-ui-test--source-files))
     (with-temp-buffer
       (insert-file-contents file)
@@ -91,15 +92,15 @@ LispM UI and of LispM Kit, and the main file every part."
             (should-not (and (string-prefix-p "lispm-" feature)
                              (not (string-prefix-p "lispm-ui" feature))
                              (not (string-prefix-p "lispm-kit" feature))
+                             (not (string-prefix-p "lispm-finder" feature))
+                             (not (string-prefix-p "lispm-prebuilt" feature))
                              (format "%s requires %s" (file-name-nondirectory file) feature))))))))
   (let ((main (with-temp-buffer
                 (insert-file-contents (expand-file-name "lispm-ui.el" lispm-ui-test--directory))
                 (buffer-string))))
-    (dolist (file (lispm-ui-test--source-files))
+    (dolist (file (directory-files lispm-ui-test--directory t "\\`lispm-ui-.*\\.el\\'"))
       (let ((feature (file-name-base file)))
-        ;; lispm-form.el is required only by what asks for its names.
-        (unless (member feature '("lispm-ui" "lispm-form"))
-          (should (string-search (format "(require '%s)" feature) main)))))))
+        (should (string-search (format "(require '%s)" feature) main))))))
 
 (ert-deftest lispm-ui-test-installed-without-tests ()
   "Installed as a package, LispM UI's tests are not byte-compiled with it:
@@ -679,7 +680,7 @@ colour the icon is drawn in most, where it can be drawn."
       (should (equal (lispm-ui-icon "document-code") "▫"))
       (should (equal (lispm-ui-icon 'emacs) "◆"))
       (should (equal (lispm-ui-icon "/some/app/icon.svg") "·"))
-      (should (eq (get-text-property 0 'face (lispm-ui-icon "folder-git-32")) 'lispm-ui-list))
+      (should (eq (get-text-property 0 'face (lispm-ui-icon "/some/app/icon.svg")) 'lispm-ui-list))
       (when (fboundp 'libxml-parse-xml-region)
         (should (equal (lispm-ui-icon 'stop) "×"))
         (should (equal (get-text-property 0 'face (lispm-ui-icon 'stop))
@@ -3077,8 +3078,11 @@ the next with savehist."
   "Return the messages LispM UI's code gives to translate; see
 `lispm-kit-i18n-messages'."
   (lispm-kit-i18n-messages (lispm-ui-test--source-files)
-                           :tr 'lispm-ui-tr :tr-n 'lispm-ui-tr-n :tr-in 'lispm-ui-tr-in
-                           :tr-noop 'lispm-ui-tr-noop :format-time 'lispm-ui-format-time))
+                           :tr '(lispm-ui-tr lispm-finder-tr)
+                           :tr-n '(lispm-ui-tr-n lispm-finder-tr-n)
+                           :tr-in '(lispm-ui-tr-in lispm-finder-tr-in)
+                           :tr-noop '(lispm-ui-tr-noop lispm-finder-tr-noop)
+                           :format-time '(lispm-ui-format-time lispm-finder-format-time)))
 
 (ert-deftest lispm-ui-test-i18n-translates-every-message ()
   "Every language but English translates every message the code gives,
@@ -3110,7 +3114,8 @@ missing from them shows as written."
     (should (equal (lispm-ui-tr "%s: fill this in" "Nom") "Nom : à remplir"))
     (should (equal (lispm-ui-tr (lispm-ui-tr-noop "Cancel")) "Annuler"))
     (should (equal (lispm-ui-tr "Not in the catalog") "Not in the catalog"))
-    (should (equal (lispm-ui-tr-n "%d item" "%d items" 2) "2 items"))
+    (should (equal (lispm-ui-tr-n "%d item" "%d items" 2) "2 éléments"))
+    (should (equal (lispm-ui-tr-n "%d thing" "%d things" 2) "2 things"))
     (should (equal (lispm-ui-language-name 'fr) "Français")))
   (should (equal (lispm-ui-i18n-catalog-file 'de) (expand-file-name "i18n/de.eld" lispm-ui-directory))))
 

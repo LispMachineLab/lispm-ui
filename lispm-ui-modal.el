@@ -40,6 +40,7 @@
 
 (require 'cl-lib)
 (require 'seq)
+(require 'lispm-ui-frp)
 
 (defun lispm-ui-modal-read-event (&optional timeout)
   "Read the next event, as `read-event' does; with TIMEOUT, return nil after
@@ -158,6 +159,25 @@ LAYOUT is a list of (VALUE LEFT TOP WIDTH HEIGHT); the first holding X, Y
 wins."
   (car (seq-find (lambda (entry) (lispm-ui-modal-inside-p (cdr entry) x y)) layout)))
 
+(defun lispm-ui-modal-hold-step (in event over-p)
+  "Pure transition for `lispm-ui-modal-hold'.
+IN is the current pressed boolean; EVENT is the input event; OVER-P tests
+whether a pointer event is over the target.
+Return `(NEW-IN ACTION)' where ACTION is `continue', `choose', `cancel',
+or `(redraw . NEW-IN)'."
+  (cond
+   ((lispm-ui-modal-cancel-p event)
+    (list in 'cancel))
+   ((lispm-ui-modal-mouse-up-p event)
+    (list in (if (funcall over-p event) 'choose 'cancel)))
+   ((mouse-movement-p event)
+    (let ((over (and (funcall over-p event) t)))
+      (if (eq over in)
+          (list in 'continue)
+        (list over (cons 'redraw over)))))
+   (t
+    (list in 'continue))))
+
 (defun lispm-ui-modal-hold (over-p draw)
   "Hold a control pressed with the mouse until the button rises, as Mac OS
 9's controls were: DRAW is called with t to draw it pushed in while the
@@ -171,19 +191,79 @@ up."
         (track-mouse
           (catch 'done
             (while t
-              (let ((event (lispm-ui-modal-read)))
-                (cond ((lispm-ui-modal-cancel-p event) (throw 'done nil))
-                      ((lispm-ui-modal-mouse-up-p event)
-                       (setq chosen (and (funcall over-p event) t))
-                       (throw 'done nil))
-                      ((mouse-movement-p event)
-                       (let ((over (and (funcall over-p event) t)))
-                         (unless (eq over in)
-                           (setq in over)
-                           (funcall draw over)))))))))
+              (pcase-let ((`(,next-in ,action)
+                           (lispm-ui-modal-hold-step in (lispm-ui-modal-read) over-p)))
+                (setq in next-in)
+                (pcase action
+                  ('cancel (throw 'done nil))
+                  ('choose (setq chosen t) (throw 'done nil))
+                  (`(redraw . ,over) (funcall draw over)))))))
       (when in
         (funcall draw nil)))
     chosen))
+
+(defun lispm-ui-modal-coalesce-mouse-move (event)
+  "Consume queued mouse-movement events and return the latest movement EVENT."
+  (while (and (not noninteractive)
+              (input-pending-p)
+              (let ((next (read-event nil nil 0)))
+                (if (mouse-movement-p next)
+                    (progn (setq event next) t)
+                  (when next
+                    (push next unread-command-events))
+                  nil))))
+  event)
+
+(defun lispm-ui-modal-coalesce-wheel (delta wheel-fn &optional ok-p)
+  "Accumulate queued same-direction wheel events into DELTA using WHEEL-FN.
+When OK-P is non-nil, each event must also satisfy OK-P."
+  (when (not noninteractive)
+    (let (next next-delta)
+      (while (and (setq next (lispm-ui-modal-read 0))
+                  (setq next-delta (funcall wheel-fn next))
+                  (= (cl-signum next-delta) (cl-signum delta))
+                  (or (null ok-p) (funcall ok-p next)))
+        (setq delta (+ delta next-delta)
+              next nil))
+      (when next
+        (push next unread-command-events))))
+  delta)
+
+(cl-defun lispm-ui-modal-run (&key initial step render effect)
+  "Run a pure reactive modal loop starting from INITIAL state.
+STEP is called as `(funcall STEP state event)' and returns
+`(NEXT-STATE . ACTIONS)'.  Each action in ACTIONS is processed:
+- `(:redraw)' calls `(funcall RENDER next-state)` when given;
+- `(:flash KIND DRAW-FN [UNDRAW-FN])' flashes a control;
+- `(:return VALUE)' exits the loop returning VALUE;
+- any other action is passed to `(funcall EFFECT next-state action)'."
+  (let* ((lispm-ui-frp--batch-depth 0)
+         (lispm-ui-frp--pending-signals nil)
+         (lispm-ui-frp--pending-effects nil)
+         (state-sig (lispm-ui-signal initial #'eq))
+         (render-eff (and render (lispm-ui-effect state-sig render))))
+    (unwind-protect
+        (track-mouse
+          (catch 'lispm-ui-modal-done
+            (while t
+              (let* ((event (lispm-ui-modal-read))
+                     (stepped (funcall step (lispm-ui-signal-get state-sig) event))
+                     (next-state (car stepped))
+                     (actions (cdr stepped)))
+                (lispm-ui-signal-set state-sig next-state)
+                (dolist (act actions)
+                  (pcase act
+                    ('(:redraw)
+                     (when render (funcall render (lispm-ui-signal-get state-sig))))
+                    (`(:flash ,kind ,draw-fn . ,rest)
+                     (lispm-ui-modal-flash kind draw-fn (car rest)))
+                    (`(:return ,value)
+                     (throw 'lispm-ui-modal-done value))
+                    (_
+                     (when effect
+                       (funcall effect (lispm-ui-signal-get state-sig) act)))))))))
+      (when render-eff
+        (lispm-ui-effect-dispose render-eff)))))
 
 (defun lispm-ui-modal-moved-p (delta &optional cells)
   "Return non-nil when DELTA, (DX . DY) in pixels, is a move rather than a

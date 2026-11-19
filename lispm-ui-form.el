@@ -37,115 +37,14 @@
 ;;     :submit "Create"
 ;;     :on-submit (lambda (values) ...))
 ;;
-;; Fields are of a :type:
+;; Fields are backed by per-field `lispm-ui-signal' cells and a derived
+;; reactive graph (`lispm-ui-frp.el') with marker-based slot
+;; reconciliation (`lispm-ui-form--places') for in-place status updates
+;; and glitch-free transactional batching across `:on-change' callbacks.
 ;;
-;;   text       one line of text
-;;   password   one line of text, shown as stars
-;;   text-area  several lines (:lines, 6 by default)
-;;   picture    an image file, shown, chosen with a button
-;;   choice     one of :choices, a pop-up menu
-;;   radio      one of :choices, a radio button each
-;;   check      on or off, a check box
-;;   buttons    no value: a row of push buttons, :buttons a list of
-;;              (LABEL . FUNCTION), each FUNCTION called with no
-;;              argument in the form's buffer when its button is pressed
-;;   rows       no value: a list of things, as accounts, a row each, its
-;;              buttons at its right; see below
-;;   status     a text the form shows, of a line or more, as how a
-;;              connection went, not typed: `lispm-ui-form-set' says it
-;;              again where it stands, the rest of the form as it is
-;;   heading    no value: a heading that starts a group of fields
-;;
-;; and take :label, :help (a line under the field, or several, or a
-;; function of the values returning them or nil, asked each time the
-;; form is drawn),
-;; :value (its value at first), :required (empty is refused), :validate
-;; (a function of the value returning nil, or what is wrong), :when (a
-;; function of the values: the field is shown only while it returns
-;; non-nil), :width (of a text field, in columns) and :on-change (a
-;; function called with the field's value each time it is changed, in
-;; the form's buffer).  :choices is a list of (VALUE . LABEL), or a
-;; function returning one.  A form whose help says how something outside
-;; it stands, as whether a server answers, is drawn again with
-;; `lispm-ui-form-redraw' when that changes.
-;;
-;; The :rows of a rows field are a list, or a function of the values
-;; returning one, asked each time the form is drawn; each row a plist:
-;; :text, a string, or a list of them, columns lined up from row to row,
-;; the last one cut to the room left; :help, a line under it, or nil;
-;; :buttons, a list of (LABEL . FUNCTION), as a buttons field's.  :empty
-;; is what the field says when there are none.  A rows field without a
-;; label starts where the labels do.  The form widens to hold the rows
-;; of its lists, the texts of its check boxes and its statuses, up to
-;; half as wide again.
-;;
-;; A field's :on-change may change the others with `lispm-ui-form-set',
-;; as an address typed fills in its servers: the form is drawn again
-;; once the change is done.
-;;
-;; `lispm-ui-form' draws it in a buffer of its own with Emacs's widgets
-;; (wid-edit.el), and returns the buffer: TAB and S-TAB go from field to
-;; field, Return to the next field (a new line in a text area), C-c C-c
-;; submits it, C-c C-k cancels it.  The mouse presses its buttons and
-;; puts point in its fields, a double click selecting a field's whole
-;; value, as a dialog's mouse does: a click on anything else does
-;; nothing, and only a text field shows a cursor.  Once its values are
-;; valid, :on-submit is called with them, an alist, and
-;; the form goes, unless it signals an error, which is shown.
-;;
-;; A form made :instant applies each change as it is made, through its
-;; fields' :on-change, as a control panel does: it has no Cancel button,
-;; nor any other unless :submit labels one, and C-c C-c and C-c C-k
-;; close it.  A form may be put in a mode of its own, derived from
-;; `lispm-ui-form-mode', for keys and menus of its own, and set up in
-;; its buffer before it is drawn, as to keep there what its fields'
-;; functions read.
-;;
-;; It is laid out as a dialog: the labels in a column, flush right, each
-;; control beside its label and the help under it, the fields as wide
-;; as `lispm-ui-form-width' says, a text area a panel as wide, a heading's
-;; fields framed in a group box, and the buttons at the bottom right.
-;; Positions are pixels, measured in the buffer's own faces, so that
-;; whatever remaps them, as to a proportional face, gets them right.
-;;
-;; A form knows nothing of where it is shown.  Once LispM UI has a
-;; palette, which whatever shows it derives (lispm-ui-palette.el), a
-;; form is dressed in its look:
-;;
-;;   - its push buttons, check boxes, radio buttons and pop-up menus are
-;;     LispM UI's controls (lispm-ui-controls.el), and a picture sits in
-;;     an image well;
-;;   - its groups are framed in group boxes;
-;;   - it is shown in the palette's colours: on the chrome's ground, its
-;;     text fields framed in the content's colour, a text area a panel
-;;     of it framed in grey, its faces remapped before it is drawn, to
-;;     be measured in them;
-;;   - the control or the text field the keyboard is on is ringed in the
-;;     focus colour, as Mac OS 9 ringed it;
-;;   - it is drawn again when the palette or the language changes.
-;;
-;; Without a palette it is drawn as text, as before one is derived; on a
-;; text terminal its controls are text, its group boxes drawn in lines.
-;;
-;; Whatever shows a form may dress it otherwise:
-;; `lispm-ui-form-glyph-function' gives the pictures of its buttons,
-;; check boxes, radio buttons, pop-up menus and pictures,
-;; `lispm-ui-form-group-function' the edges of its group boxes,
-;; `lispm-ui-form-choose-function' shows a pop-up menu's choices,
-;; `lispm-ui-form-choose-file-function' the files to choose a picture
-;; from, its faces may be remapped (`lispm-ui-form-mode-hook' runs
-;; before it is drawn) and `lispm-ui-form-show-header' set to nil where
-;; its window is titled with it, and `lispm-ui-form-drawn-hook' runs once
-;; it is drawn, as `lispm-ui-form-redraw' draws it again, when the look
-;; changes, say.  What it shows is read with `lispm-ui-form-title',
-;; `lispm-ui-form-geometry' and `lispm-ui-form-widgets'.
-;; Each control's widget says what it is, as the glyph function was
-;; asked, in its :lispm-form-control: `check' or `radio' (its state is
-;; its value), or (KIND STATE LABEL) for a button or a pop-up menu, so
-;; that it can be drawn otherwise, as focused.  A form an application
-;; draws with Emacs's widgets itself is dressed as LispM UI's are when
-;; it calls `lispm-ui-form-dress' once drawn, its controls saying what
-;; they are in a property of `lispm-ui-form-control-properties'.
+;; Widget shaping, password masking and mouse handling live in
+;; `lispm-ui-form-widgets.el'; visual dressing and modal prompt dialogs
+;; live in `lispm-ui-form-dress.el'.
 
 ;;; Code:
 
@@ -158,6 +57,7 @@
 (require 'face-remap)
 (require 'wid-edit)
 (require 'lispm-ui-base)
+(require 'lispm-ui-frp)
 (require 'lispm-ui-i18n)
 (require 'lispm-ui-palette)
 (require 'lispm-ui-modal)
@@ -167,9 +67,6 @@
 
 ;; Only in an Emacs that draws images.
 (declare-function image-size "image.c" (spec &optional pixels frame))
-(declare-function global-hl-line-unhighlight "hl-line" ())
-(defvar global-hl-line-mode)
-(defvar hl-line-mode)
 
 (defconst lispm-ui-form-types
   '(text password text-area picture choice radio check buttons rows status heading)
@@ -259,6 +156,12 @@ of its lines."
 (defvar-local lispm-ui-form--values nil
   "The values of the form in this buffer: an alist (KEY . VALUE).")
 
+(defvar-local lispm-ui-form--signals nil
+  "Alist `(KEY . SIGNAL)` of reactive source signals for each field in this form.")
+
+(defvar-local lispm-ui-form--all-values-signal nil
+  "Derived `lispm-ui-signal' projecting normalized `(KEY . VALUE)` for all fields.")
+
 (defvar-local lispm-ui-form--props nil
   "The properties the form in this buffer was made with.")
 
@@ -287,6 +190,9 @@ it having changed while it could not be.")
   "The buffer of the form whose field's :on-change is being called, or
 nil: the form is drawn again once it returns, not while it runs.")
 
+(require 'lispm-ui-form-widgets)
+(require 'lispm-ui-form-dress)
+
 (defun lispm-ui-form-title (&optional buffer)
   "Return the title of the form in BUFFER, by default the current buffer."
   (buffer-local-value 'lispm-ui-form--title (or buffer (current-buffer))))
@@ -300,6 +206,11 @@ a plist of pixels, see `lispm-ui-form--geometry'."
   "Return the first widget of each field shown of the form in BUFFER, by
 default the current buffer: an alist (KEY . WIDGET)."
   (buffer-local-value 'lispm-ui-form--widgets (or buffer (current-buffer))))
+
+(defun lispm-ui-form-signal (key &optional buffer)
+  "Return the reactive `lispm-ui-signal' for field KEY in BUFFER."
+  (with-current-buffer (or buffer (current-buffer))
+    (alist-get key lispm-ui-form--signals)))
 
 (defvar-keymap lispm-ui-form-mode-map
   :doc "Keymap of `lispm-ui-form-mode'."
@@ -336,6 +247,40 @@ TAB and S-TAB go from field to field, \\[lispm-ui-form-submit] submits it,
   (electric-indent-local-mode -1)
   (add-hook 'post-command-hook #'lispm-ui-form--keep-point nil t))
 
+;;;; Reactive state graph
+
+(defun lispm-ui-form--normalize-value (key raw &optional fields)
+  "Normalize RAW value of field KEY (trimming non-password strings).
+FIELDS defaults to `lispm-ui-form--fields' in the current buffer."
+  (if (stringp raw)
+      (let* ((type (plist-get (cdr (assq key (or fields lispm-ui-form--fields))) :type))
+             (text (if (eq type 'password) raw (string-trim raw))))
+        (and (not (string-empty-p text)) text))
+    raw))
+
+(defun lispm-ui-form--init-signals ()
+  "Initialize per-field source signals and the derived all-values signal."
+  (setq lispm-ui-form--signals
+        (mapcar (pcase-lambda (`(,key . ,val))
+                  (cons key (lispm-ui-signal val)))
+                lispm-ui-form--values))
+  (let* ((fields lispm-ui-form--fields)
+         (keys (mapcar #'car fields))
+         (sigs (mapcar #'cdr lispm-ui-form--signals)))
+    (setq lispm-ui-form--all-values-signal
+          (lispm-ui-signal-derived
+           sigs
+           (lambda (&rest vals)
+             (cl-mapcar (lambda (k v)
+                          (cons k (lispm-ui-form--normalize-value k v fields)))
+                        keys vals))))))
+
+(defun lispm-ui-form--set-raw-value (key value)
+  "Update field KEY's raw VALUE in both the alist and its reactive signal."
+  (setf (alist-get key lispm-ui-form--values) value)
+  (when-let* ((sig (alist-get key lispm-ui-form--signals)))
+    (lispm-ui-signal-set sig value)))
+
 ;;;; Making a form
 
 (cl-defun lispm-ui-form (title fields &key values submit cancel intro on-submit on-cancel
@@ -370,6 +315,7 @@ called with no argument in its buffer before it is drawn."
                                       (alist-get key values)
                                     (plist-get (cdr field) :value)))))
                     fields))
+      (lispm-ui-form--init-signals)
       (when setup
         (funcall setup))
       (lispm-ui-form--draw)
@@ -388,11 +334,10 @@ called with no argument in its buffer before it is drawn."
 (defun lispm-ui-form-value (key)
   "The value of the field KEY of the form in this buffer, as it is now.
 A text is trimmed, a password not; either is nil when empty."
-  (let ((value (alist-get key lispm-ui-form--values)))
-    (if (stringp value)
-        (let ((text (if (eq (lispm-ui-form--type key) 'password) value (string-trim value))))
-          (and (not (string-empty-p text)) text))
-      value)))
+  (let ((raw (if-let* ((sig (alist-get key lispm-ui-form--signals)))
+                 (lispm-ui-signal-get sig)
+               (alist-get key lispm-ui-form--values))))
+    (lispm-ui-form--normalize-value key raw)))
 
 (defun lispm-ui-form--type (key)
   "The type of the field KEY of the form in this buffer."
@@ -405,8 +350,10 @@ A text is trimmed, a password not; either is nil when empty."
 
 (defun lispm-ui-form--all-values ()
   "The values of every field of the form in this buffer: an alist."
-  (mapcar (lambda (field) (cons (car field) (lispm-ui-form-value (car field))))
-          lispm-ui-form--fields))
+  (if (lispm-ui-signal-p lispm-ui-form--all-values-signal)
+      (lispm-ui-signal-get lispm-ui-form--all-values-signal)
+    (mapcar (lambda (field) (cons (car field) (lispm-ui-form-value (car field))))
+            lispm-ui-form--fields)))
 
 (defun lispm-ui-form-values ()
   "The values of the fields of the form in this buffer that are shown: an alist."
@@ -425,14 +372,15 @@ that returns."
   (unless (derived-mode-p 'lispm-ui-form-mode)
     (user-error "%s" (lispm-ui-tr "Not a form")))
   (let ((keys nil))
-    (while key
-      (setf (alist-get key lispm-ui-form--values) value)
-      (push key keys)
-      (setq key (pop more)
-            value (pop more)))
+    (lispm-ui-frp-batch
+      (while key
+        (lispm-ui-form--set-raw-value key value)
+        (push key keys)
+        (setq key (pop more)
+              value (pop more))))
     (cond ((eq lispm-ui-form--changing (current-buffer))
            (setq lispm-ui-form--stale t))
-          ((and (seq-every-p (lambda (key) (eq (lispm-ui-form--type key) 'status)) keys)
+          ((and (seq-every-p (lambda (k) (eq (lispm-ui-form--type k) 'status)) keys)
                 (seq-every-p #'lispm-ui-form--draw-in-place (nreverse keys))))
           (t (lispm-ui-form--draw)))))
 
@@ -442,12 +390,13 @@ field's :on-change with it.  With REDRAW, draw the form again; else, if
 :on-change changed what it shows, once the command changing it is done:
 not while the text of a field is being changed."
   (let ((buffer (current-buffer)))
-    (setf (alist-get key lispm-ui-form--values) value)
     (unwind-protect
-        (when-let* ((on-change (plist-get (cdr (assq key lispm-ui-form--fields)) :on-change)))
-          (let ((lispm-ui-form--changing buffer)
-                (lispm-ui-in-gui-action t))
-            (funcall on-change value)))
+        (lispm-ui-frp-batch
+          (lispm-ui-form--set-raw-value key value)
+          (when-let* ((on-change (plist-get (cdr (assq key lispm-ui-form--fields)) :on-change)))
+            (let ((lispm-ui-form--changing buffer)
+                  (lispm-ui-in-gui-action t))
+              (funcall on-change value))))
       ;; Shown as it now is, whatever :on-change refused.
       (when (buffer-live-p buffer)
         (with-current-buffer buffer
@@ -761,127 +710,6 @@ one; of a form applying its changes at once, the one closing it, if any."
           (let ((text (lispm-ui-form--label-text label)))
             (insert (lispm-ui-form--at :label (lispm-ui-form--measure text)) text)))))))
 
-(defun lispm-ui-form--draw-text-field (key type props value label-fn row-fn)
-  "Insert a `text' or `password' field KEY with PROPS and VALUE."
-  (funcall
-   row-fn
-   (lambda ()
-     (funcall label-fn)
-     (insert (lispm-ui-form--at :control))
-     (lispm-ui-form--remember
-      key (widget-create (if (eq type 'password) 'lispm-ui-form-password 'editable-field)
-                         ;; Padded far, its padding drawn as one
-                         ;; blank to the fields' right edge: see
-                         ;; `lispm-ui-form--shape-field'.
-                         :size (max 200 (+ 32 (length (or value ""))))
-                         :format "%v"
-                         :value (or value "")
-                         :lispm-form-width (plist-get props :width)
-                         :action (if (plist-get props :submit)
-                                     (lambda (&rest _) (lispm-ui-form-submit))
-                                   (lambda (&rest _) (widget-forward 1)))
-                         :notify (lambda (widget &optional _child event)
-                                   ;; Told once it is changed, not before too.
-                                   (unless (eq (car-safe event) 'before-change)
-                                     (when (eq type 'password)
-                                       (lispm-ui-form--mask-password widget event))
-                                     (lispm-ui-form--one-line widget)
-                                     (lispm-ui-form--changed key (widget-value widget))
-                                     (lispm-ui-form--shape-field widget))))))))
-
-(defun lispm-ui-form--draw-text-area-field (key props value group label-fn)
-  "Insert a multi-line `text-area' field KEY with PROPS and VALUE in GROUP."
-  (let* ((lines (or (plist-get props :lines) 6))
-         (shown (string-trim-right (or value ""))))
-    ;; A panel framed a pixel wide: a thin line above, one below,
-    ;; and a side about each of its lines.
-    (lispm-ui-form--row group (lambda () (lispm-ui-form--area-rule)) t)
-    (let ((sides (lispm-ui-form--sides group)))
-      (when sides (insert (car sides)))
-      (funcall label-fn)
-      (insert (lispm-ui-form--at :control 1) (lispm-ui-form--edge))
-      (lispm-ui-form--remember
-       key (widget-create 'text
-                          :format "%v"
-                          :value-face 'lispm-ui-form-area
-                          ;; Its lines but the last end in a newline;
-                          ;; Emacs's widgets end that one, as they end
-                          ;; a text field of no fixed size.
-                          :value (concat shown (make-string (max 0 (- lines 1 (cl-count ?\n shown))) ?\n))
-                          :lispm-form-group group
-                          :notify (lambda (widget &optional _child event)
-                                    (unless (eq (car-safe event) 'before-change)
-                                      (lispm-ui-form--changed key (widget-value widget))
-                                      (lispm-ui-form--shape-area widget))))))
-    (lispm-ui-form--row group (lambda () (lispm-ui-form--area-rule)) t)))
-
-(defun lispm-ui-form--draw-picture-field (key label value label-fn row-fn)
-  "Insert a `picture' field KEY with LABEL and VALUE."
-  (funcall
-   row-fn
-   (lambda ()
-     (funcall label-fn)
-     (insert (lispm-ui-form--at :control))
-     (let ((glyph (lispm-ui-form--glyph 'picture nil value)))
-       (cond (glyph (insert-image glyph (if value (file-name-nondirectory value) " ")))
-             ((and value (display-graphic-p) (file-readable-p value))
-              (insert-image (create-image value nil nil :max-width 64 :max-height 64
-                                          :ascent 'center)
-                            (file-name-nondirectory value)))
-             (t (insert (propertize (if value (file-name-nondirectory value)
-                                      (lispm-ui-tr "No picture"))
-                                    'face 'lispm-ui-form-help)))))
-     (insert (propertize " " 'display `(space :width (,(plist-get lispm-ui-form--geometry :em)))))
-     (lispm-ui-form--remember
-      key (lispm-ui-form--button (lispm-ui-tr "Choose…")
-                                 (lambda ()
-                                   (when-let* ((file (lispm-ui-form--read-picture value label)))
-                                     (lispm-ui-form--changed key file t)))))
-     (when value
-       (insert " ")
-       (lispm-ui-form--button (lispm-ui-tr "Remove") (lambda () (lispm-ui-form--changed key nil t)))))))
-
-(defun lispm-ui-form--draw-rows-field (key field props start label-fn row-fn)
-  "Insert a `rows' field KEY with FIELD definition and PROPS at START."
-  (let ((rows (lispm-ui-form--rows field)))
-    (if rows
-        (let ((columns (or (lispm-ui-form--columns rows start)
-                           (list (plist-get lispm-ui-form--geometry start)))))
-          (dolist (each rows)
-            (funcall row-fn (lambda ()
-                              (funcall label-fn)
-                              (lispm-ui-form--draw-row key each columns)))
-            (when-let* ((help (plist-get each :help)))
-              (dolist (line (split-string help "\n"))
-                (funcall row-fn (lambda () (insert (lispm-ui-form--at start) (lispm-ui-form--help line start))))))))
-      (funcall row-fn (lambda ()
-                        (funcall label-fn)
-                        (insert (lispm-ui-form--at start)
-                                (lispm-ui-form--help (or (plist-get props :empty) "") start)))))))
-
-(defun lispm-ui-form--draw-choice-field (key field props label value label-fn row-fn)
-  "Insert a `choice' popup field KEY with FIELD definition, PROPS, and VALUE."
-  (let* ((choices (lispm-ui-form--choices field))
-         (shown (or (cdr (assoc value choices)) (lispm-ui-tr "Choose…"))))
-    (funcall
-     row-fn
-     (lambda ()
-       (funcall label-fn)
-       (insert (lispm-ui-form--at :control))
-       (lispm-ui-form--remember
-        key (widget-create 'push-button
-                           :tag (concat shown " ▾")
-                           :tag-glyph (lispm-ui-form--glyph 'popup nil shown)
-                           :lispm-form-control (list 'popup nil shown)
-                           :notify (lambda (_widget &optional _child event)
-                                     (when-let* ((choice (funcall lispm-ui-form-choose-function
-                                                                  (or label lispm-ui-form--title)
-                                                                  choices value event)))
-                                       (lispm-ui-form--changed key (car choice) t)))))
-       (when-let* ((buttons (plist-get props :buttons)))
-         (insert (propertize " " 'display `(space :width (,(plist-get lispm-ui-form--geometry :em)))))
-         (lispm-ui-form--insert-buttons (or (plist-get props :buttons-key) key) buttons))))))
-
 (defun lispm-ui-form--draw-field (field group)
   "Insert FIELD of the form, its label and its help, in GROUP's box if any."
   (pcase-let* ((`(,key . ,props) field)
@@ -1010,386 +838,6 @@ row of buttons alone has them where its text would start."
       (insert (if texts (lispm-ui-form--at :right width) (lispm-ui-form--at (car columns))))
       (lispm-ui-form--insert-buttons key buttons))))
 
-(defun lispm-ui-form--fit (text pixels)
-  "TEXT cut to PIXELS wide in this buffer's faces, ending in an ellipsis
-when it was cut."
-  (if (<= (lispm-ui-form--measure text) pixels)
-      text
-    (let ((length (lispm-ui-form--bisect
-                   (lambda (n) (<= (lispm-ui-form--measure (concat (substring text 0 n) "…")) pixels))
-                   0 (length text))))
-      (concat (string-trim-right (substring text 0 length))
-              (propertize "…" 'face (get-text-property (max 0 (1- length)) 'face text))))))
-
-(defun lispm-ui-form--area-rule ()
-  "Insert the thin line above or below a text area: its frame's top or bottom."
-  (insert (lispm-ui-form--at :control 1 '(:height 10))
-          (propertize " " 'display `(space :width (,(+ 2 (- (plist-get lispm-ui-form--geometry :right)
-                                                           (plist-get lispm-ui-form--geometry :control))))
-                                           :height (1))
-                      'face '(lispm-ui-form-area-edge (:height 10)))))
-
-(defun lispm-ui-form--shape ()
-  "Shape the fields of the form in this buffer: each text field as wide as
-the form's fields, each text area a panel as wide, the form's keys
-working in each."
-  (dolist (field widget-field-list)
-    (lispm-ui-form--field-keys field)
-    (pcase (widget-type field)
-      ((or 'editable-field 'lispm-ui-form-password) (lispm-ui-form--shape-field field))
-      ('text (lispm-ui-form--shape-area field)))))
-
-(defun lispm-ui-form--field-keys (field)
-  "Let the keys of the form's mode work in FIELD too, as C-c C-c: Emacs's
-widgets make a field's keymap the local one, in place of the mode's,
-and here it goes before the mode's instead."
-  (when-let* ((overlay (widget-get field :field-overlay))
-              ((overlayp overlay))
-              (start (overlay-start overlay)))
-    ;; Its last newline too, in an overlay of its own.
-    (dolist (each (overlays-in start (min (point-max) (+ 2 (overlay-end overlay)))))
-      (when-let* (((or (eq (overlay-get each 'field) field) (eq (overlay-get each 'real-field) field)))
-                  (map (overlay-get each 'local-map)))
-        (overlay-put each 'local-map nil)
-        (overlay-put each 'keymap map)))))
-
-(defun lispm-ui-form--shape-field (widget)
-  "Make the text field WIDGET as wide as the form's fields, whatever its text.
-It shows as much of its text as that holds, the rest hidden: its start,
-or, while point is in it, the text about point, scrolled as a dialog's
-field scrolls, so that a long text, as one pasted, never runs past the
-field's edge onto a line of its own.  Its padding, the blanks Emacs's
-widgets end a field of a fixed size with, is drawn as one blank reaching
-to the right edge, the rest of it hidden, so that the field is one run
-of its face, framed once."
-  (when (and (widget-field-start widget)
-             (widget-field-end widget)
-             (widget-field-text-end widget)
-             (>= (widget-field-text-end widget) (1- (widget-field-end widget))))
-    (with-silent-modifications
-      (save-excursion
-        (goto-char (widget-field-end widget))
-        (if (overlayp (widget-get widget :field-overlay))
-            (insert (make-string 32 ?\s))
-          (insert-before-markers (make-string 32 ?\s))))
-      (widget-put widget :size (- (widget-field-end widget) (widget-field-start widget)))))
-  (let* ((start (widget-field-start widget))
-         (end (widget-field-end widget))
-         (text-end (widget-field-text-end widget))
-         (here (and start end (<= start (point) end)))
-         ;; Blanks just typed are shown, though they end the text, until
-         ;; point leaves them: they are as Emacs's widgets pad a field.
-         (shown (if (and text-end end (< text-end (point) end)) (point) text-end))
-         (left (plist-get lispm-ui-form--geometry :control))
-         (right (if-let* ((width (widget-get widget :lispm-form-width)))
-                    (+ left (* width (plist-get lispm-ui-form--geometry :em)))
-                  (plist-get lispm-ui-form--geometry :right))))
-    (when (and start end text-end)
-      (with-silent-modifications
-        (remove-list-of-text-properties start end '(display invisible lispm-ui-form-padding))
-        (pcase-let ((`(,from . ,to) (lispm-ui-form--field-window
-                                     widget start shown (and here (point)) (- right left))))
-          (widget-put widget :lispm-form-from (- from start))
-          (put-text-property start from 'invisible t)
-          (put-text-property to shown 'invisible t))
-        (when (< shown end)
-          ;; The last blank reaches the edge, the others before it are
-          ;; hidden: the frame closes only where the field's face ends
-          ;; right after what is shown.  Invisible, not displayed as "":
-          ;; after each command Emacs takes point out of text displayed
-          ;; as nothing, even from its start, to the field's end, and
-          ;; what is typed next goes there, after the blanks.
-          (put-text-property shown end 'lispm-ui-form-padding t)
-          (put-text-property shown
-                             (if (and (= shown start) (< shown (- end 2)))
-                                 (- end 2)
-                               (1- end))
-                             'invisible t)
-          (put-text-property (1- end) end 'display `(space :align-to (,right))))))))
-
-(defun lispm-ui-form--field-window (widget start end point width)
-  "What the text field WIDGET shows of its text from START to END: (FROM . TO).
-That is as much as WIDTH pixels hold, less an em for the cursor after
-it.  While POINT, non-nil, is in the field, POINT is shown, the field
-scrolled no further than that needs from where it was; else its start."
-  (let* ((point (and point (min point end)))
-         (room (- width (plist-get lispm-ui-form--geometry :em)))
-         (fits (lambda (from to) (<= (lispm-ui-form--field-pixels widget from to) room)))
-         (from (if point
-                   (min point end (+ start (or (widget-get widget :lispm-form-from) 0)))
-                 start))
-         (to (lispm-ui-form--bisect (lambda (to) (funcall fits from to)) from end)))
-    (when (and point (or (> point to) (and (= to end) (> from start))))
-      ;; Point past what is shown, the field scrolls left as far as
-      ;; that needs; text taken away, what was scrolled out comes back.
-      (let ((last (max point to)))
-        (setq from (- last (lispm-ui-form--bisect (lambda (n) (funcall fits (- last n) last))
-                                                  0 (- last start)))
-              to (lispm-ui-form--bisect (lambda (to) (funcall fits from to)) last end))))
-    (cons from to)))
-
-(defun lispm-ui-form--bisect (holds low high)
-  "The last of the numbers LOW to HIGH for which the function HOLDS does:
-it holds for LOW and, once it does not, for none after."
-  (while (< low high)
-    (let ((middle (/ (+ low high 1) 2)))
-      (if (funcall holds middle)
-          (setq low middle)
-        (setq high (1- middle)))))
-  low)
-
-(defun lispm-ui-form--field-pixels (widget from to)
-  "Pixels the text of the text field WIDGET from FROM to TO takes."
-  (lispm-ui-form--measure (propertize (buffer-substring-no-properties from to)
-                                      'face (or (widget-get widget :value-face) 'widget-field))))
-
-(defun lispm-ui-form--one-line (widget)
-  "Take the line breaks out of the text field WIDGET, as a text pasted into
-it brings: a text field holds one line, a password too, its line breaks
-shown as stars."
-  (when-let* ((start (widget-field-start widget)))
-    (save-excursion
-      (goto-char start)
-      (while (< (point) (widget-field-end widget))
-        (if (memq (or (get-text-property (point) 'secret) (char-after)) '(?\n ?\r))
-            (delete-char 1)
-          (forward-char 1))))))
-
-(define-widget 'lispm-ui-form-password 'editable-field
-  "A text field of a form whose text is shown as stars."
-  :value-create #'lispm-ui-form--password-create
-  :value-get #'lispm-ui-form--password)
-
-(defun lispm-ui-form--password-stars (text)
-  "TEXT as stars, each keeping the character it stands for."
-  (let ((stars (make-string (length text) ?*)))
-    (dotimes (i (length text))
-      (put-text-property i (1+ i) 'secret
-                         (or (and (eq (aref text i) ?*) (get-text-property i 'secret text))
-                             (aref text i))
-                         stars))
-    (put-text-property 0 (length stars) 'rear-nonsticky '(secret) stars)
-    stars))
-
-(defun lispm-ui-form--password-create (widget)
-  "Insert the password field WIDGET as stars from the start."
-  (let ((value (widget-get widget :value)))
-    (unwind-protect
-        (progn
-          (widget-put widget :value (lispm-ui-form--password-stars value))
-          (widget-field-value-create widget))
-      (widget-put widget :value value))))
-
-(defun lispm-ui-form--mask-password (widget event)
-  "Mask the text added to the password field WIDGET by EVENT."
-  (when (eq (car-safe event) 'after-change)
-    (let* ((from (nth 1 event))
-           (to (min (nth 2 event) (widget-field-end widget)))
-           (stars (lispm-ui-form--password-stars (buffer-substring from to)))
-           (here (point))
-           (inhibit-modification-hooks t)
-           (buffer-undo-list t))
-      ;; The changed range includes typed spaces, unlike the field's text end.
-      (delete-region from to)
-      (goto-char from)
-      (insert stars)
-      (goto-char here))))
-
-(defun lispm-ui-form--password (widget)
-  "The text of the password field WIDGET: what its stars stand for, a star
-typed standing for itself, which Emacs's widgets take for none."
-  (if-let* ((from (widget-field-start widget))
-            (to (widget-field-text-end widget)))
-      (with-current-buffer (widget-field-buffer widget)
-        (apply #'string (mapcar (lambda (position)
-                                  (or (get-text-property position 'secret) (char-after position)))
-                                (number-sequence from (1- to)))))
-    (widget-get widget :value)))
-
-(defun lispm-ui-form--keep-point ()
-  "Keep point out of the padding of the text field it is in: at the end of
-what the field holds, where a dialog's field keeps it, the field scrolled
-to show it.  A text field point has left shows its start again.  Run
-after each command in a form's buffer."
-  ;; At its very end too, where `widget-end-of-line' goes, past its
-  ;; padding.
-  (let ((field (widget-field-find (point)))
-        (left lispm-ui-form--field-at-point))
-    (unless (and field (memq (widget-type field) '(editable-field lispm-ui-form-password)))
-      (setq field nil))
-    (when-let* ((field)
-                (padding (text-property-any (widget-field-start field) (widget-field-end field)
-                                            'lispm-ui-form-padding t))
-                ((< padding (point))))
-      (goto-char padding))
-    (setq lispm-ui-form--field-at-point field)
-    (when (and left (not (eq left field)) (widget-field-start left))
-      (lispm-ui-form--shape-field left))
-    (when field
-      (lispm-ui-form--shape-field field))))
-
-(defun lispm-ui-form--press-button (window button position event)
-  "Hold the form's BUTTON at POSITION in WINDOW pressed from EVENT until the
-mouse rises, and run its action when it rises over BUTTON, as Mac OS 9's
-controls do."
-  (select-window window)
-  (let* ((buffer (window-buffer window))
-         (overlay (widget-get button :button-overlay))
-         (start (and (overlayp overlay) (overlay-start overlay)))
-         (control (and start (with-current-buffer buffer
-                               (lispm-ui-form--control-at start))))
-         (place (and (not widget-button-click-moves-point)
-                     (lispm-ui-form--place)))
-         (restored (when control
-                     (pcase-let ((`(,_ ,_ ,plain ,focused ,_) control))
-                       (if (equal control (buffer-local-value 'lispm-ui-form--focus buffer))
-                           focused
-                         plain))))
-         (pressed (nth 4 control))
-         (same-buffer-p
-          (lambda ()
-            (and (window-live-p window)
-                 (buffer-live-p buffer)
-                 (eq (window-buffer window) buffer))))
-         (chosen
-          (lispm-ui-modal-hold
-           (lambda (ev)
-             (let* ((pos (event-end ev))
-                    (win (posn-window pos))
-                    (pt (posn-point pos))
-                    (s (and (overlayp overlay) (eq (overlay-buffer overlay) buffer)
-                            (overlay-start overlay)))
-                    (e (and (overlayp overlay) (eq (overlay-buffer overlay) buffer)
-                            (overlay-end overlay))))
-               (and (funcall same-buffer-p)
-                    (eq win window)
-                    (integerp pt)
-                    (or (and s e (<= s pt) (< pt e))
-                        (eq (with-current-buffer buffer
-                              (get-char-property pt 'button))
-                            button)))))
-           (lambda (in)
-             (when (and control (funcall same-buffer-p)
-                        (overlayp overlay) (eq (overlay-buffer overlay) buffer))
-               (with-current-buffer buffer
-                 (let ((s (overlay-start overlay))
-                       (e (overlay-end overlay)))
-                   (when (and s e (<= e (point-max)))
-                     (lispm-ui-form--show s e (if in pressed restored)))))
-               (redisplay t))))))
-    (when (and chosen (funcall same-buffer-p))
-      (with-selected-window window
-        (when widget-button-click-moves-point
-          (goto-char (or (and (overlayp overlay) (eq (overlay-buffer overlay) buffer)
-                              (overlay-start overlay))
-                         position)))
-        (let ((lispm-ui-in-gui-action t))
-          (widget-apply-action button event))
-        (when (and place (funcall same-buffer-p))
-          (with-current-buffer buffer
-            (lispm-ui-form--go-to place)))))))
-
-(defun lispm-ui-form--mouse (event)
-  "Do what the mouse EVENT does in a form, as in a dialog: on a field or a
-control, what it does in Emacs, a double or triple click in a field of
-one line selecting its whole value, without its padding; on anything
-else, nothing, point and the region staying where they are."
-  (interactive "e")
-  (let* ((start (event-start event))
-         (window (posn-window start))
-         (position (posn-point start))
-         (modifiers (event-modifiers event)))
-    (when (and (window-live-p window) (integerp position))
-      (let* ((buffer (window-buffer window))
-             (button (with-current-buffer buffer
-                       (get-char-property position 'button)))
-             (widget (or button
-                         (with-current-buffer buffer
-                           (widget-at position)))))
-        (cond
-         ((not widget)
-          (select-window window))
-         ((and (memq (widget-type widget) '(editable-field lispm-ui-form-password))
-               (or (memq 'double modifiers) (memq 'triple modifiers)))
-          (select-window window)
-          (goto-char (widget-field-end widget))
-          (lispm-ui-form--keep-point)
-          (push-mark (widget-field-start widget) t t)
-          (activate-mark)
-          (setq deactivate-mark nil))
-         (button
-          (when (memq 'down modifiers)
-            (lispm-ui-form--press-button window button position event)))
-         ((memq 'down modifiers)
-          (select-window window)
-          (widget-button-click event))
-         ((memq 'drag modifiers) (mouse-set-region event))
-         (t (mouse-set-point event t)))))))
-
-(defun lispm-ui-form--shape-area (widget)
-  "Make the text area WIDGET a panel as wide as the form's fields, framed:
-its lines after the first start where the first does, each runs to the
-right edge."
-  (let ((overlay (widget-get widget :field-overlay))
-        (group (widget-get widget :lispm-form-group)))
-    (mapc #'delete-overlay (widget-get widget :lispm-form-pads))
-    (when-let* ((tail (widget-get widget :lispm-form-tail)))
-      (delete-overlay tail))
-    (when (overlayp overlay)
-      (let* ((sides (lispm-ui-form--sides group))
-             (start (overlay-start overlay))
-             ;; Its last newline ends it, in an overlay of its own; an
-             ;; Emacs before 31 leaves that newline after the field, in
-             ;; none, and the panel gives it one.
-             (last (or (widget-get widget :field-end-overlay)
-                       (when (eq (char-after (overlay-end overlay)) ?\n)
-                         (let ((tail (make-overlay (overlay-end overlay)
-                                                   (1+ (overlay-end overlay)))))
-                           (widget-put widget :lispm-form-tail tail)
-                           tail))))
-             (end (max (overlay-end overlay) (if (overlayp last) (or (overlay-end last) 0) 0)))
-             pads)
-        (dolist (overlay (list overlay last))
-          (when (overlayp overlay)
-            (overlay-put overlay 'line-prefix
-                         (concat (car sides) (lispm-ui-form--at :control 1) (lispm-ui-form--edge)))
-            (overlay-put overlay 'wrap-prefix
-                         (concat (car sides) (lispm-ui-form--at :control 1) (lispm-ui-form--edge)))))
-        ;; Emacs's widgets put a blank after the newline that ends a field,
-        ;; for a frame drawn about the field's text: this one has none, and
-        ;; the blank would make the line after it as tall as any.
-        (when (overlayp last)
-          (overlay-put last 'after-string nil))
-        (save-excursion
-          (goto-char start)
-          (while (search-forward "\n" end t)
-            ;; Over the newline: the panel runs on to the right edge before
-            ;; it, and the newline itself is not the panel's.
-            (let ((pad (make-overlay (1- (point)) (point))))
-              ;; The cursor at the end of a line stays by its text, not
-              ;; after the panel's edge.
-              (overlay-put pad 'before-string
-                           (concat (propertize (lispm-ui-form--at :right nil 'lispm-ui-form-area) 'cursor t)
-                                   (lispm-ui-form--edge)
-                                   (or (cdr sides) "")))
-              (overlay-put pad 'face 'default)
-              (overlay-put pad 'priority 10)
-              (push pad pads))))
-        (widget-put widget :lispm-form-pads pads)))))
-
-(defun lispm-ui-form-choose (label choices value event)
-  "Show CHOICES, a list of (VALUE . TEXT), as LABEL's; return (VALUE) chosen.
-A menu for EVENT, if one can pop up, else Emacs's own way for the
-keyboard (see `widget-choose')."
-  (if (lispm-ui-popup-available-p)
-      (lispm-ui-choose choices value
-                       (or (and (mouse-event-p event) (posn-point (event-start event)))
-                           (point))
-                       label)
-    (widget-choose label
-                   (mapcar (lambda (choice) (cons (cdr choice) (list (car choice)))) choices)
-                   event)))
-
 (defun lispm-ui-form-redraw ()
   "Draw the form in this buffer again, as it is, point staying where it was;
 from a field's :on-change, once that returns."
@@ -1420,252 +868,6 @@ form are told, as when it is drawn."
           (delete-region start old)))
       (run-hooks 'lispm-ui-form-drawn-hook)
       t)))
-
-(defun lispm-ui-form--picture-p (file)
-  "Non-nil if FILE is a picture: one Emacs shows, or named as pictures are.
-An Emacs without a display shows none, but keeps them all the same."
-  (or (image-supported-file-p file)
-      (member (downcase (or (file-name-extension file) "")) '("png" "jpg" "jpeg" "gif" "svg" "webp"))))
-
-(defun lispm-ui-form-choose-file (type label file predicate)
-  "Show the files a form's field of TYPE and LABEL may choose, FILE chosen
-now, those PREDICATE takes, with `lispm-ui-choose-file'; return the file
-chosen, or nil.  A picture's are titled so, the picture selected
-previewed beside them.  This is the default
-`lispm-ui-form-choose-file-function'."
-  (ignore label)
-  (lispm-ui-choose-file :title (if (eq type 'picture)
-                                   (lispm-ui-tr "Choose a Picture")
-                                 (lispm-ui-tr "Choose a File"))
-                        :file file :predicate predicate :preview (eq type 'picture)))
-
-(defun lispm-ui-form--read-picture (old &optional label)
-  "Choose the file of a picture for the field LABEL, from OLD's directory:
-among the files `lispm-ui-form-choose-file-function' shows, or in the
-minibuffer.  Return it, or nil when none was chosen."
-  (when-let* ((file (if lispm-ui-form-choose-file-function
-                        (funcall lispm-ui-form-choose-file-function 'picture label old #'lispm-ui-form--picture-p)
-                      (read-file-name (lispm-ui-tr "Picture: ")
-                                      (and old (file-name-directory old)) nil t nil
-                                      (lambda (file)
-                                        (or (file-directory-p file) (lispm-ui-form--picture-p file)))))))
-    (unless (and (file-regular-p file) (lispm-ui-form--picture-p file))
-      (user-error "%s" (lispm-ui-tr "Not a picture: %s" (abbreviate-file-name file))))
-    (expand-file-name file)))
-
-;;;; Dressing
-
-(defvar-local lispm-ui-form--focus nil
-  "What of the form in this buffer is drawn focused: (START END PLAIN
-FOCUSED) for a control, the text from START to END showing its image
-FOCUSED in place of PLAIN; (field . OVERLAY) for a text field; or nil.")
-
-(defvar-local lispm-ui-form--remaps nil
-  "The face remappings dressing the form in this buffer, to undo.")
-
-(defface lispm-ui-form-text-area '((t :extend t))
-  "Face of a text area of several lines of a form not LispM UI's: a panel
-of the content's colour."
-  :group 'lispm-ui)
-
-(defconst lispm-ui-form-well-size 64
-  "Width and height in pixels of the picture in a form's image well.")
-
-(defvar lispm-ui-form-control-properties '(:lispm-form-control)
-  "The properties of a widget saying what control of a form it is, as
-`lispm-ui-form-glyph-function' gives them: LispM UI's forms', and those
-of applications drawing forms of their own the same way, which add
-theirs.")
-
-(defun lispm-ui-form--image (kind state label &optional focused pressed)
-  "Return the image of a form's control of KIND in STATE reading LABEL, ringed
-when FOCUSED, pushed in when PRESSED; nil without a palette, or on a
-text terminal, where the form draws it as text."
-  (when (and lispm-ui-current-palette (not (lispm-ui-tty-p)))
-    (if (eq kind 'picture)
-        (lispm-ui-form--well label)
-      (lispm-ui-image-of
-       (pcase kind
-         ('check (lispm-ui-check-box (eq state 'on) (and pressed 'pressed) focused 2))
-         ('radio (lispm-ui-radio (eq state 'on) (and pressed 'pressed) focused))
-         ('button (lispm-ui-push-button label :default (eq state 'default)
-                                        :state (and pressed 'pressed) :focused focused))
-         ('popup (lispm-ui-popup-button label :state (and pressed 'pressed) :focused focused)))))))
-
-(defun lispm-ui-form--well (file)
-  "Return an image well holding the picture in FILE, or empty for nil: the
-picture framed in a well sunk into the window, as Mac OS 9 drew one."
-  (lispm-ui-image
-   (list 'form-well file)
-   (lambda ()
-     (let* ((size lispm-ui-form-well-size)
-            (palette lispm-ui-current-palette)
-            (grey (lambda (level) (lispm-ui-grey palette level)))
-            (svg (svg-create (+ size 4) (+ size 4))))
-       ;; Shaded along its top and left, lit along its bottom and right.
-       (lispm-ui-svg-fill svg 0 0 (+ size 4) (+ size 4) (funcall grey #xFF))
-       (lispm-ui-svg-fill svg 0 0 (+ size 3) (+ size 3) (funcall grey #x88))
-       (lispm-ui-svg-fill svg 1 1 (+ size 2) (+ size 2) (plist-get palette :outline))
-       (lispm-ui-svg-fill svg 2 2 size size (plist-get palette :content))
-       (when (and file (file-readable-p file))
-         (lispm-ui-svg-emacs-image svg (create-image file) 2 2 size size))
-       svg))))
-
-(defun lispm-ui-form-glyph (kind state label)
-  "Return the image of a form's control, LispM UI's, or nil for text.
-KIND, STATE and LABEL are as `lispm-ui-form-glyph-function' gives them.
-Without a palette, or on a text terminal, it is nil.  Emacs's widgets
-centre a check box's or a radio button's image on its line themselves,
-and an image saying so twice is no image."
-  (when-let* ((image (lispm-ui-form--image kind state label)))
-    (if (memq kind '(check radio))
-        (cons 'image (map-delete (copy-sequence (cdr image)) :ascent))
-      image)))
-
-(defun lispm-ui-form-group (part &rest args)
-  "Return PART of a form's group box, LispM UI's, a string; nil without a
-palette.  PART and ARGS are as `lispm-ui-form-group-function' gives
-them: the top edge, titled, and the bottom one are LispM UI's group
-box's; a side is its grey line and its lit one, as tall as the line they
-stand on.  On a text terminal they are drawn in lines of text."
-  (when lispm-ui-current-palette
-    (pcase part
-      ('top (lispm-ui-group-edge (car args) (cadr args)))
-      ('bottom (lispm-ui-group-edge (car args) nil t))
-      ('side (if (lispm-ui-tty-p)
-                 (lispm-ui-group-side 1)
-               (let ((palette lispm-ui-current-palette))
-                 (concat (propertize " " 'display '(space :width (1))
-                                     'face `(:background ,(lispm-ui-grey palette #x88)))
-                         (propertize " " 'display '(space :width (1))
-                                     'face `(:background ,(lispm-ui-grey palette #xFF))))))))))
-
-(defun lispm-ui-form--control-at (position)
-  "The control of the form at POSITION drawn as an image, as (START END
-PLAIN FOCUSED PRESSED): the text it is drawn over, and its images; or nil."
-  (when-let* ((widget (widget-at position))
-              (control (seq-some (lambda (property) (widget-get widget property))
-                                 lispm-ui-form-control-properties))
-              (overlay (widget-get widget :button-overlay))
-              ((overlayp overlay))
-              (start (overlay-start overlay))
-              ((consp (get-text-property start 'display))))
-    (pcase-let ((`(,kind ,state ,label)
-                 (if (consp control)
-                     control
-                   (list control (if (widget-value widget) 'on 'off) nil))))
-      (when-let* ((plain (lispm-ui-form--image kind state label))
-                  (focused (lispm-ui-form--image kind state label t))
-                  (pressed (lispm-ui-form--image kind state label nil t)))
-        (list start (overlay-end overlay) plain focused pressed)))))
-
-(defun lispm-ui-form--show (start end image)
-  "Show IMAGE over the text from START to END, quietly."
-  (with-silent-modifications
-    (let ((inhibit-read-only t))
-      (put-text-property start end 'display image))))
-
-(defun lispm-ui-form--field-overlay (position)
-  "The overlay of the form's text field of one line at POSITION, or nil.
-A text area has no frame to ring."
-  (when-let* ((field (widget-field-at position))
-              ((not (eq (widget-type field) 'text))))
-    (let ((overlay (widget-get field :field-overlay)))
-      (and (overlayp overlay) overlay))))
-
-(defun lispm-ui-form--follow ()
-  "Draw focused what of the form in this buffer point is on, and plain what
-was before: a control ringed, a text field framed in the focus colour.
-Only a text field keeps the cursor when the form is dressed in images.
-Run from the buffer's `post-command-hook', and once the form is drawn."
-  (setq-local cursor-type
-              (if (and lispm-ui-current-palette (not (lispm-ui-tty-p))
-                       (not (widget-field-find (point))))
-                  nil
-                (default-value 'cursor-type)))
-  (let* ((control (lispm-ui-form--control-at (point)))
-         (field (and (not control) (lispm-ui-form--field-overlay (point))))
-         (now (cond (control control)
-                    (field (cons 'field field)))))
-    (unless (equal now lispm-ui-form--focus)
-      (pcase lispm-ui-form--focus
-        (`(field . ,overlay)
-         (when (overlay-buffer overlay)
-           (overlay-put overlay 'face 'widget-field)))
-        (`(,start ,end ,plain . ,_)
-         (when (<= end (point-max))
-           (lispm-ui-form--show start end plain))))
-      (pcase now
-        (`(field . ,overlay)
-         (overlay-put overlay 'face 'lispm-ui-field-focused))
-        (`(,start ,end ,_ ,focused . ,_) (lispm-ui-form--show start end focused)))
-      (setq lispm-ui-form--focus now))))
-
-(defun lispm-ui-form--faces ()
-  "Remap the faces of the form in this buffer to the palette: the list face
-on the chrome's ground, the fields framed in the content's colour, a text
-area in it, framed in grey, the help small and muted.  LispM UI's forms
-take them before they are drawn, to be measured in them.  Without a
-palette, or on a text terminal, the faces are left as they are."
-  (mapc #'face-remap-remove-relative lispm-ui-form--remaps)
-  (setq lispm-ui-form--remaps
-        (when (and lispm-ui-current-palette (not (lispm-ui-tty-p)))
-          (let ((content (lispm-ui-color :content)))
-            (list (face-remap-add-relative 'default 'lispm-ui-list
-                                           `(:background ,(lispm-ui-color :chrome)))
-                  (face-remap-add-relative 'widget-field 'lispm-ui-field)
-                  (face-remap-add-relative 'lispm-ui-form-area `(:background ,content :foreground
-                                                                ,(lispm-ui-color :text)))
-                  (face-remap-add-relative 'lispm-ui-form-area-edge
-                                           `(:background ,(lispm-ui-grey lispm-ui-current-palette #x88)))
-                  (face-remap-add-relative 'lispm-ui-form-text-area `(:background ,content))
-                  (face-remap-add-relative 'lispm-ui-form-help 'lispm-ui-small
-                                           `(:foreground ,(lispm-ui-color :muted)))
-                  (face-remap-add-relative 'lispm-ui-form-title 'lispm-ui-title))))))
-
-(defun lispm-ui-form--text-areas ()
-  "Draw the text areas of the form in this buffer as panels of the
-content's colour, their lines after the first lined up with it: a form
-not LispM UI's, which draws its own."
-  (dolist (field widget-field-list)
-    (when-let* (((eq (car field) 'text))
-                (overlay (widget-get field :field-overlay))
-                ((overlayp overlay)))
-      (overlay-put overlay 'face 'lispm-ui-form-text-area)
-      (overlay-put overlay 'line-prefix "  ")
-      ;; Its last newline is in an overlay of its own.
-      (when-let* ((end (widget-get field :field-end-overlay))
-                  ((overlayp end)))
-        (overlay-put end 'face 'lispm-ui-form-text-area)
-        (overlay-put end 'line-prefix "  ")))))
-
-(defun lispm-ui-form-dress ()
-  "Dress the form in this buffer, just drawn, once LispM UI has a palette:
-what point is on drawn focused, as the keyboard moves.  A form not LispM
-UI's, drawn with Emacs's widgets as an application's settings are, is
-put in the palette's colours too, its text areas panels.  Run
-from `lispm-ui-form-drawn-hook', and from an application's like it."
-  (when lispm-ui-current-palette
-    (unless (derived-mode-p 'lispm-ui-form-mode)
-      (setq-local global-hl-line-mode nil)
-      (when (bound-and-true-p hl-line-mode)
-        (hl-line-mode -1))
-      (when (fboundp 'global-hl-line-unhighlight)
-        (global-hl-line-unhighlight))
-      (lispm-ui-form--faces)
-      (lispm-ui-form--text-areas))
-    (add-hook 'post-command-hook #'lispm-ui-form--follow nil t)
-    ;; What was focused was drawn over.
-    (setq lispm-ui-form--focus nil)
-    (lispm-ui-form--follow)))
-
-(defun lispm-ui-form-redraw-all (&rest _)
-  "Draw every form again, in the palette and the language now in use."
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (derived-mode-p 'lispm-ui-form-mode)
-        (lispm-ui-form--faces)
-        (lispm-ui-form-redraw)))))
 
 (add-hook 'lispm-ui-form-mode-hook #'lispm-ui-form--faces)
 (add-hook 'lispm-ui-form-drawn-hook #'lispm-ui-form-dress)
@@ -1723,236 +925,6 @@ from `lispm-ui-form-drawn-hook', and from an application's like it."
         (kill-buffer buffer))
        (t
         (quit-window t window))))))
-
-;;;; Modal prompt forms
-
-(defconst lispm-ui-form-choice-buttons-supported t
-  "Non-nil when `choice' fields support inline `:buttons' and `:buttons-key'.")
-
-(defvar lispm-ui-form-modal-show-function #'lispm-ui-form--modal-show-default
-  "Function showing a modal form's buffer and returning a cleanup function.
-Called with BUFFER, it displays BUFFER in a selected window or frame and
-returns a function of no arguments that closes it when the prompt ends.")
-
-(defvar lispm-ui-form-prompt-function nil
-  "Optional function overriding `lispm-ui-form-prompt'.
-When non-nil, called with (PROMPT &key INITIAL DEFAULT PASSWORD CHOICES
-REQUIRE-MATCH VALIDATE).")
-
-(defun lispm-ui-form--modal-show-default (buffer)
-  "Show modal form BUFFER in a child frame or window; return a cleanup function."
-  (if (and (not noninteractive)
-           (or (display-graphic-p) (featurep 'tty-child-frames)))
-      (let* ((parent (selected-frame))
-             (geom (lispm-ui-form-geometry buffer))
-             (outer (or (plist-get geom :outer) 420))
-             (width (+ outer 40))
-             (height (with-current-buffer buffer
-                       (let ((truncate-lines t))
-                         (+ (cdr (buffer-text-pixel-size buffer nil t)) 40))))
-             (frame (let ((after-make-frame-functions nil)
-                          (before-make-frame-hook nil))
-                      (make-frame
-                       `((parent-frame . ,parent)
-                         (minibuffer . nil)
-                         (undecorated . ,(not (lispm-ui-tty-p parent)))
-                         (unsplittable . t) (no-other-frame . t)
-                         (child-frame-border-width . 1) (internal-border-width . 0)
-                         (left-fringe . 0) (right-fringe . 0)
-                         (vertical-scroll-bars . nil) (horizontal-scroll-bars . nil)
-                         (menu-bar-lines . 0) (tool-bar-lines . 0) (tab-bar-lines . 0)
-                         (desktop-dont-save . t) (visibility . nil)
-                         (background-color . ,(or (lispm-ui-color :chrome)
-                                                  (frame-parameter parent 'background-color)))
-                         (foreground-color . ,(or (lispm-ui-color :text)
-                                                  (frame-parameter parent 'foreground-color)))
-                         (width . 50) (height . 10)))))
-             (root (frame-root-window frame)))
-        (set-window-buffer root buffer)
-        (set-window-dedicated-p root t)
-        (set-window-fringes root 0 0)
-        (let ((frame-resize-pixelwise t))
-          (set-frame-size frame width (max 140 height) t))
-        (set-frame-position frame
-                            (max 0 (/ (- (frame-pixel-width parent) width) 2))
-                            (max 0 (/ (- (frame-pixel-height parent) height) 3)))
-        (make-frame-visible frame)
-        (select-frame-set-input-focus frame)
-        (select-window root)
-        (lambda ()
-          (when (frame-live-p frame)
-            (delete-frame frame t))
-          (when (frame-live-p parent)
-            (select-frame-set-input-focus parent))))
-    (let ((config (current-window-configuration)))
-      (pop-to-buffer buffer)
-      (lambda ()
-        (when (window-configuration-p config)
-          (set-window-configuration config))))))
-
-(defalias 'lispm-ui-form-modal-show-default #'lispm-ui-form--modal-show-default)
-
-(defun lispm-ui-form--prompt-choose-dir (title start)
-  "Open `lispm-ui-choose-file' for a folder starting at START, preserving focus."
-  (let ((modal-frame (selected-frame)))
-    (condition-case nil
-        (unwind-protect
-            (lispm-ui-choose-file
-             :title title
-             :directory (if (file-directory-p start)
-                            (file-name-as-directory start)
-                          (file-name-as-directory (expand-file-name "~")))
-             :predicate #'file-directory-p)
-          (when (frame-live-p modal-frame)
-            (select-frame-set-input-focus modal-frame)))
-      (quit nil))))
-
-(defun lispm-ui-form--prompt-fields (title init-val password choice-pairs require-match validate choose-directory browse-buttons on-preset)
-  "Construct the field specification list for `lispm-ui-form-prompt'."
-  (let ((val-type (if password 'password 'text)))
-    (cond
-     (choose-directory
-      `((:value :type ,val-type :label ,title
-                :value ,init-val :submit t :validate ,validate)
-        ,@(if choice-pairs
-              `((:preset :type choice :label ,(lispm-ui-tr "Choose")
-                         :value ,(and (assoc init-val choice-pairs) init-val)
-                         :choices ,choice-pairs
-                         :buttons ,browse-buttons
-                         :buttons-key :browse
-                         :on-change ,on-preset))
-            `((:browse :type buttons :buttons ,browse-buttons)))))
-     ((and choice-pairs require-match)
-      `((:value :type choice :label ,title
-                :value ,init-val
-                :choices ,choice-pairs
-                :validate ,validate)))
-     (choice-pairs
-      `((:preset :type choice :label ,(lispm-ui-tr "Choose")
-                 :value ,(and (assoc init-val choice-pairs) init-val)
-                 :choices ,choice-pairs
-                 :on-change ,on-preset)
-        (:value :type ,val-type :label ,title
-                :value ,init-val :submit t :validate ,validate)))
-     (t
-      `((:value :type ,val-type :label ,title
-                :value ,init-val :submit t :validate ,validate))))))
-
-(defun lispm-ui-form--setup-modal-keymap ()
-  "Bind `keyboard-quit' and `ESC' to `lispm-ui-form-cancel' in a local keymap copy."
-  (use-local-map (copy-keymap (current-local-map)))
-  (local-set-key [remap keyboard-quit] #'lispm-ui-form-cancel)
-  (local-set-key (kbd "ESC") #'lispm-ui-form-cancel)
-  (local-set-key (kbd "<escape>") #'lispm-ui-form-cancel))
-
-(defun lispm-ui-form--prompt-browse-buttons (title init-val base-dir choice-pairs buffer-fn)
-  "Return the `Choose…' button spec for `lispm-ui-form-prompt'."
-  `((,(lispm-ui-tr "Choose…") .
-     ,(lambda ()
-        (let ((buffer (funcall buffer-fn)))
-          (when (buffer-live-p buffer)
-            (let* ((current (with-current-buffer buffer
-                              (or (lispm-ui-form-value :value) init-val)))
-                   (start (if (and (stringp current)
-                                   (not (string-empty-p (string-trim current))))
-                              (expand-file-name (string-trim current) base-dir)
-                            base-dir))
-                   (chosen (lispm-ui-form--prompt-choose-dir title start)))
-              (when (and chosen (buffer-live-p buffer))
-                (let ((abbr (abbreviate-file-name
-                             (file-name-as-directory (expand-file-name chosen base-dir)))))
-                  (with-current-buffer buffer
-                    (if choice-pairs
-                        (lispm-ui-form-set :value abbr
-                                           :preset (and (assoc abbr choice-pairs) abbr))
-                      (lispm-ui-form-set :value abbr))))))))))))
-
-(cl-defun lispm-ui-form-prompt (prompt &key initial default password choices
-                                       require-match validate choose-directory)
-  "Ask PROMPT in a modal `lispm-ui-form' dialog and return the string entered.
-INITIAL is the initial text in the field; DEFAULT is returned when the
-field is submitted empty.  PASSWORD masks the input as stars.  CHOICES,
-a list of strings, offers a pop-up menu of presets above the field (or
-alone when REQUIRE-MATCH is non-nil).  VALIDATE, a function of the
-value returning an error string or nil, checks the value before
-submitting.  When CHOOSE-DIRECTORY is non-nil, include a `Choose…'
-button that opens `lispm-ui-choose-file' for a folder.  Cancelling
-signals `quit'."
-  (if lispm-ui-form-prompt-function
-      (funcall lispm-ui-form-prompt-function prompt
-               :initial initial :default default :password password
-               :choices choices :require-match require-match :validate validate)
-    (let* ((clean (replace-regexp-in-string "[ \t]*:?[ \t]*\\'" "" (or prompt "")))
-           (title (if (string-empty-p clean) (lispm-ui-tr "Choose") clean))
-           (base-dir (file-name-as-directory (expand-file-name default-directory)))
-           (choice-pairs (mapcar (lambda (c)
-                                   (let ((text (format "%s" (if (consp c) (car c) c))))
-                                     (cons text text)))
-                                 choices))
-           (init-val (cond ((and (stringp initial) (not (string-empty-p initial))) initial)
-                           ((and (stringp default) (not (string-empty-p default))) default)
-                           ((and require-match choice-pairs) (caar choice-pairs))
-                           (t "")))
-           (submitted nil)
-           (closing nil)
-           (result nil)
-           (buffer nil)
-           (cleanup nil)
-           (depth (recursion-depth))
-           (exit-with (lambda (ok &optional val)
-                        (when (<= (recursion-depth) (1+ depth))
-                          (setq closing t
-                                submitted ok
-                                result val)
-                          (when (= (recursion-depth) (1+ depth))
-                            (exit-recursive-edit)))))
-           (on-preset (lambda (val)
-                        (when (and val (buffer-live-p buffer))
-                          (with-current-buffer buffer
-                            (lispm-ui-form-set :value val)))))
-           (browse-buttons
-            (when choose-directory
-              (lispm-ui-form--prompt-browse-buttons
-               title init-val base-dir choice-pairs (lambda () buffer))))
-           (fields (lispm-ui-form--prompt-fields
-                    title init-val password choice-pairs require-match
-                    validate choose-directory browse-buttons on-preset)))
-      (setq buffer
-            (lispm-ui-form
-             title fields
-             :modal t
-             :on-submit (lambda (values)
-                          (funcall exit-with t
-                                   (or (alist-get :value values)
-                                       (and (stringp default) default)
-                                       "")))
-             :on-cancel (apply-partially exit-with nil)
-             :setup #'lispm-ui-form--setup-modal-keymap))
-      (with-current-buffer buffer
-        (add-hook 'kill-buffer-hook
-                  (lambda ()
-                    (unless closing
-                      (funcall exit-with nil)))
-                  nil t))
-      (unwind-protect
-          (progn
-            (setq cleanup (funcall lispm-ui-form-modal-show-function buffer))
-            (with-current-buffer buffer
-              (lispm-ui-form--first-field)
-              (lispm-ui-form--keep-point)
-              (when lispm-ui-current-palette
-                (lispm-ui-form--follow)))
-            (let ((lispm-ui-in-gui-action nil)
-                  (lispm-ui--command-from-mouse nil))
-              (recursive-edit)))
-        (setq closing t)
-        (when (functionp cleanup)
-          (ignore-errors (funcall cleanup)))
-        (when (buffer-live-p buffer)
-          (kill-buffer buffer)))
-      (unless submitted
-        (signal 'quit nil))
-      result)))
 
 (provide 'lispm-ui-form)
 ;;; lispm-ui-form.el ends here

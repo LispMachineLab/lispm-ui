@@ -53,6 +53,7 @@
 
 (require 'lispm-kit-i18n)
 (require 'lispm-ui-base)
+(require 'lispm-ui-frp)
 
 (defalias 'lispm-ui-tr-noop #'lispm-kit-tr-noop
   "Return MESSAGE as it is, marking it as words to translate where shown.
@@ -101,6 +102,15 @@ shows words.")
 else the first a function of `lispm-ui-language-functions' returns that
 it speaks, else the computer's."
   (lispm-kit-current-language 'lispm-ui))
+
+(defvar lispm-ui-language-signal (lispm-ui-signal (lispm-ui-current-language) #'eq)
+  "Reactive signal holding `lispm-ui-current-language'.")
+
+(defun lispm-ui-i18n--sync-signal ()
+  "Synchronize `lispm-ui-language-signal' when the active language changes."
+  (lispm-ui-signal-set lispm-ui-language-signal (lispm-ui-current-language)))
+
+(add-hook 'lispm-ui-language-changed-hook #'lispm-ui-i18n--sync-signal -90)
 
 ;;;; Catalogs
 

@@ -4,7 +4,7 @@
 
 ;; Author: Ryan.K
 ;; URL: https://github.com/LispMachineLab/lispm-ui
-;; Version: 0.8.1
+;; Version: 0.9.0
 ;; Package-Requires: ((emacs "30.1"))
 ;; Keywords: convenience, faces, mouse
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
@@ -31,6 +31,8 @@
 ;;
 ;;   lispm-ui-base.el   where it is, whether a frame is a text terminal,
 ;;                      and lengths drawn in pixels counted in cells there
+;;   lispm-ui-frp.el    functional reactive programming: glitch-free
+;;                      push-pull signals, effects, batches, and streams
 ;;   lispm-ui-i18n.el   the language its words are shown in, and their
 ;;                      translations, i18n/, which LispM Kit's engine
 ;;                      reads
@@ -48,9 +50,10 @@
 ;;                      as PNGs, for text terminals
 ;;   lispm-ui-icons.el  icons, found by name: an interface's own, or
 ;;                      the alerts' and files', which LispM UI has
+;;   lispm-ui-tabs.el   tab strips and folder-tab panes, drawn and in text
 ;;   lispm-ui-controls.el
 ;;                      its controls: push buttons, pop-up menus, bevel
-;;                      buttons, tabs, radio buttons, check boxes and group
+;;                      buttons, radio buttons, check boxes and group
 ;;                      boxes, drawn, as strings and in buffers
 ;;   lispm-ui-list.el   lists' column headings and disclosure triangles
 ;;   lispm-ui-scroll.el scroll bars, drawn
@@ -67,6 +70,10 @@
 ;;   lispm-ui-menu.el   menus, drawn, and choices shown in them
 ;;   lispm-ui-file-dialog.el
 ;;                      the dialog choosing a file
+;;   lispm-ui-form-widgets.el
+;;                      widgets and controls inside forms
+;;   lispm-ui-form-dress.el
+;;                      dressing Custom and Widget buffers as forms
 ;;   lispm-ui-form.el   forms, written as data
 ;;
 ;; lispm-form.el keeps the names LispM's forms had before they moved
@@ -81,6 +88,7 @@
 
 (require 'lispm-kit)
 (require 'lispm-ui-base)
+(require 'lispm-ui-frp)
 (require 'lispm-ui-i18n)
 (require 'lispm-ui-palette)
 (require 'lispm-ui-look)
@@ -90,6 +98,7 @@
 (require 'lispm-ui-icons)
 (require 'lispm-ui-modal)
 (require 'lispm-ui-ask)
+(require 'lispm-ui-tabs)
 (require 'lispm-ui-controls)
 (require 'lispm-ui-list)
 (require 'lispm-ui-scroll)
@@ -99,6 +108,8 @@
 (require 'lispm-ui-alert)
 (require 'lispm-ui-menu)
 (require 'lispm-ui-file-dialog)
+(require 'lispm-ui-form-widgets)
+(require 'lispm-ui-form-dress)
 (require 'lispm-ui-form)
 
 (provide 'lispm-ui)

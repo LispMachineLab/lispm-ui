@@ -343,6 +343,64 @@ shadow.  Return its frame; nothing is read from the user."
                          'alert)
     popup))
 
+(cl-defstruct (lispm-ui-alert--state
+               (:constructor lispm-ui-alert--make-state)
+               (:copier lispm-ui-alert--copy-state))
+  "Immutable interactive state of a modal alert."
+  pressed held focused)
+
+(defun lispm-ui-alert--step (state event buttons default cancel button-at-fn)
+  "Pure state transition for a modal alert.
+Given STATE, EVENT, BUTTONS, DEFAULT, CANCEL and BUTTON-AT-FN, return
+`(NEXT-STATE . ACTIONS)' where each action is `(:redraw)',
+`(:flash-press VALUE)', or `(:return VALUE)'."
+  (let* ((role (lispm-ui-modal-role event))
+         (step (lispm-ui-modal-step event))
+         (values (mapcar #'cadr buttons))
+         (key-button (seq-find (lambda (button) (memql event (nthcdr 3 button))) buttons))
+         (pressed (lispm-ui-alert--state-pressed state))
+         (held (lispm-ui-alert--state-held state))
+         (focused (lispm-ui-alert--state-focused state)))
+    (cond
+     (key-button
+      (cons state (list (list :flash-press (nth 1 key-button)))))
+     ((and (eq role 'cancel) (or cancel default))
+      (cons state (list (list :return (or cancel default)))))
+     ((and (eq role 'confirm) default)
+      (cons state (list (list :flash-press default))))
+     (step
+      (let ((next-focus (nth (lispm-ui-modal-cycle (seq-position values focused)
+                                                   step (length values))
+                             values))
+            (next (lispm-ui-alert--copy-state state)))
+        (setf (lispm-ui-alert--state-focused next) next-focus)
+        (cons next nil)))
+     ((and focused (eq role 'press))
+      (cons state (list (list :flash-press focused))))
+     ((lispm-ui-modal-mouse-down-p event)
+      (if-let* ((target (funcall button-at-fn event)))
+          (let ((next (lispm-ui-alert--copy-state state)))
+            (setf (lispm-ui-alert--state-held next) target
+                  (lispm-ui-alert--state-pressed next) target)
+            (cons next nil))
+        (cons state nil)))
+     ((and held (mouse-movement-p event))
+      (let ((over (equal (funcall button-at-fn event) held)))
+        (if (eq over (and pressed t))
+            (cons state nil)
+          (let ((next (lispm-ui-alert--copy-state state)))
+            (setf (lispm-ui-alert--state-pressed next) (and over held))
+            (cons next nil)))))
+     ((lispm-ui-modal-mouse-up-p event)
+      (if (and held (equal (funcall button-at-fn event) held))
+          (cons state (list (list :return held)))
+        (let ((next (lispm-ui-alert--copy-state state)))
+          (setf (lispm-ui-alert--state-held next) nil
+                (lispm-ui-alert--state-pressed next) nil)
+          (cons next '((:redraw))))))
+     (t
+      (cons state nil)))))
+
 (defun lispm-ui-alert-default (icon message buttons &optional detail)
   "Show a Mac OS 9 alert and return the value of the button chosen.
 ICON is `caution', `stop' or `note'; MESSAGE is the question, DETAIL a
@@ -358,56 +416,32 @@ otherwise."
         (cancel (nth 1 (seq-find (lambda (button) (eq (nth 2 button) 'cancel)) buttons))))
     (if (not (lispm-ui-popup-available-p))
         (lispm-ui--alert-in-minibuffer message buttons detail cancel)
-      (let* ((popup (lispm-ui-alert-open icon message buttons detail))
-             (values (mapcar #'cadr buttons))
-             (pressed nil) (held nil) (focused nil) (choice cancel))
+      (let ((popup (lispm-ui-alert-open icon message buttons detail)))
         (unwind-protect
-            (cl-flet* ((redraw ()
-                         (lispm-ui-alert--draw popup icon message detail buttons pressed focused)
-                         (redisplay t))
-                       (press (value)
-                         ;; A button pressed from the keyboard blinks, as
-                         ;; Mac OS 9's did, and is chosen.
-                         (lispm-ui-modal-flash 'button (lambda () (setq pressed value) (redraw)))
-                         (setq choice value) (throw 'done nil)))
-              (track-mouse
-                (catch 'done
-                  (while t
-                    (let* ((event (lispm-ui-modal-read))
-                           (role (lispm-ui-modal-role event))
-                           (step (lispm-ui-modal-step event)))
-                      (cond
-                       ((seq-find (lambda (button) (memql event (nthcdr 3 button))) buttons)
-                        (press (nth 1 (seq-find (lambda (button) (memql event (nthcdr 3 button)))
-                                                buttons))))
-                       ((and (eq role 'cancel) (or cancel default))
-                        ;; An alert with no Cancel, only OK, is dismissed.
-                        (setq choice (or cancel default)) (throw 'done nil))
-                       ((and (eq role 'confirm) default)
-                        (press default))
-                       (step
-                        ;; Tab goes from no button to the first, as from the
-                        ;; message to the controls.
-                        (setq focused (nth (lispm-ui-modal-cycle (seq-position values focused) step
-                                                                 (length values))
-                                           values))
-                        (redraw))
-                       ((and focused (eq role 'press))
-                        ;; Space presses the button the keyboard is on.
-                        (press focused))
-                       ((lispm-ui-modal-mouse-down-p event)
-                        (when (setq held (lispm-ui-alert--button-at event popup))
-                          (setq pressed held) (redraw)))
-                       ((and held (mouse-movement-p event))
-                        (let ((over (equal (lispm-ui-alert--button-at event popup) held)))
-                          (unless (eq over (and pressed t))
-                            (setq pressed (and over held)) (redraw))))
-                       ((lispm-ui-modal-mouse-up-p event)
-                        (when (and held (equal (lispm-ui-alert--button-at event popup) held))
-                          (setq choice held) (throw 'done nil))
-                        (setq held nil pressed nil) (redraw))))))))
-          (lispm-ui-popup-dispose popup))
-        choice))))
+            (cl-flet ((draw-state (st)
+                        (lispm-ui-alert--draw
+                         popup icon message detail buttons
+                         (lispm-ui-alert--state-pressed st)
+                         (lispm-ui-alert--state-focused st))
+                        (redisplay t)))
+              (lispm-ui-modal-run
+               :initial (lispm-ui-alert--make-state)
+               :step (lambda (st event)
+                       (lispm-ui-alert--step
+                        st event buttons default cancel
+                        (lambda (ev) (lispm-ui-alert--button-at ev popup))))
+               :render #'draw-state
+               :effect (lambda (st action)
+                         (pcase action
+                           (`(:flash-press ,value)
+                            (lispm-ui-modal-flash
+                             'button
+                             (lambda ()
+                               (let ((flashed (lispm-ui-alert--copy-state st)))
+                                 (setf (lispm-ui-alert--state-pressed flashed) value)
+                                 (draw-state flashed))))
+                            (throw 'lispm-ui-modal-done value))))))
+          (lispm-ui-popup-dispose popup))))))
 
 (provide 'lispm-ui-alert)
 ;;; lispm-ui-alert.el ends here

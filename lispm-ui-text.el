@@ -50,6 +50,16 @@
 
 ;;;; Lengths
 
+(defun lispm-ui-text-bisect (holds low high)
+  "Return the largest integer in LOW..HIGH for which unary predicate HOLDS is true.
+Assumes HOLDS is monotonic: true at LOW and false above the threshold."
+  (while (< low high)
+    (let ((middle (/ (+ low high 1) 2)))
+      (if (funcall holds middle)
+          (setq low middle)
+        (setq high (1- middle)))))
+  low)
+
 (defun lispm-ui-text-width (text &optional face)
   "Return the width in pixels of TEXT shown in its faces, FACE beneath them.
 On a text terminal, in cells."
@@ -64,13 +74,11 @@ an ellipsis when it was cut.  The ellipsis takes the face TEXT starts
 with."
   (if (<= (lispm-ui-text-width text face) pixels)
       text
-    (let ((low 0) (high (length text)))
-      ;; The longest start of TEXT that fits with its ellipsis.
-      (while (< low high)
-        (let ((middle (/ (+ low high 1) 2)))
-          (if (<= (lispm-ui-text-width (concat (substring text 0 middle) "…") face) pixels)
-              (setq low middle)
-            (setq high (1- middle)))))
+    (let ((low (lispm-ui-text-bisect
+                (lambda (middle)
+                  (<= (lispm-ui-text-width (concat (substring text 0 middle) "…") face)
+                      pixels))
+                0 (length text))))
       (concat (string-trim-right (substring text 0 low))
               (propertize "…" 'face (get-text-property 0 'face text))))))
 

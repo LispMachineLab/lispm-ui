@@ -3475,5 +3475,204 @@ confirm, `completing-read' `require-match', `~'-prefixed filenames, and
                    (lispm-ui-form-submit)))))
       (should (equal (lispm-ui-form-prompt "Name:" :default "Alice") "Alice")))))
 
+;;;; lispm-ui-frp
+
+(ert-deftest lispm-ui-test-frp-signals-and-glitch-free-batch ()
+  "Source and derived signals form a glitch-free topological DAG: a diamond
+dependency updates once per transaction, effects run after the batch
+commits, and disposed effects stop firing."
+  (let* ((a (lispm-ui-signal 1))
+         (b (lispm-ui-signal-map (lambda (x) (* x 2)) a))
+         (c (lispm-ui-signal-map (lambda (x) (+ x 10)) a))
+         (computes 0)
+         (d (lispm-ui-signal-combine
+             (lambda (bv cv)
+               (setq computes (1+ computes))
+               (+ bv cv))
+             (list b c)))
+         (observed nil)
+         (eff (lispm-ui-effect d (lambda (dv) (push dv observed)))))
+    (should (lispm-ui-signal-source-p a))
+    (should (lispm-ui-signal-derived-p d))
+    (should (= (lispm-ui-signal-get d) 13))
+    (should (= computes 1))
+    ;; Updating source `a' propagates through `b' and `c' to `d' once (no glitch):
+    (lispm-ui-signal-set a 5)
+    (should (= (lispm-ui-signal-get d) 25))
+    (should (= computes 2))
+    (should (equal observed '(25)))
+    ;; Multiple updates in a batch trigger downstream computation and effect once:
+    (lispm-ui-frp-batch
+      (lispm-ui-signal-set a 2)
+      (lispm-ui-signal-update a #'+ 8))
+    (should (= (lispm-ui-signal-get d) 40))
+    (should (= computes 3))
+    (should (equal observed '(40 25)))
+    ;; Disposing effect prevents further invocations:
+    (lispm-ui-effect-dispose eff)
+    (lispm-ui-signal-set a 3)
+    (should (= (lispm-ui-signal-get d) 19))
+    (should (equal observed '(40 25)))
+    ;; Setting a derived signal signals `lispm-ui-frp-error':
+    (should-error (lispm-ui-signal-set d 0) :type 'lispm-ui-frp-error)))
+
+(ert-deftest lispm-ui-test-frp-streams-and-combinators ()
+  "Event streams support `map', `filter', `merge', `fold', and time-windowed
+`buffer-within' accumulation."
+  (let* ((s1 (lispm-ui-stream))
+         (s2 (lispm-ui-stream))
+         (merged (lispm-ui-stream-merge
+                  (lispm-ui-stream-map (lambda (x) (* x 10))
+                                       (lispm-ui-stream-filter #'cl-evenp s1))
+                  s2))
+         (sum-sig (lispm-ui-stream-fold #'+ 0 merged))
+         (clock 100.0)
+         (typed-stream (lispm-ui-stream))
+         (typed-sig (lispm-ui-stream-buffer-within
+                     1.0 (lambda (acc ch) (concat acc (char-to-string ch)))
+                     "" typed-stream (lambda () clock))))
+    (dolist (x '(1 2 3 4))
+      (lispm-ui-stream-emit s1 x))
+    (lispm-ui-stream-emit s2 5)
+    (should (= (lispm-ui-signal-get sum-sig) 65))
+    ;; Time-windowed type-select accumulation:
+    (lispm-ui-stream-emit typed-stream ?a)
+    (setq clock 100.4)
+    (lispm-ui-stream-emit typed-stream ?d)
+    (setq clock 100.8)
+    (lispm-ui-stream-emit typed-stream ?a)
+    (should (equal (lispm-ui-signal-get typed-sig) "ada"))
+    ;; After > 1.0s pause, buffer resets:
+    (setq clock 102.5)
+    (lispm-ui-stream-emit typed-stream ?b)
+    (should (equal (lispm-ui-signal-get typed-sig) "b"))))
+
+(ert-deftest lispm-ui-test-frp-form-and-modal-step ()
+  "Forms expose per-field reactive signals and derived all-values signals;
+alert and hold modal state machines transition purely."
+  (let ((buffer (lispm-ui-form "Reactive"
+                               '((host :type text :label "Host" :value "localhost")
+                                 (port :type text :label "Port" :value "8080")))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (let ((host-sig (lispm-ui-form-signal 'host))
+                (seen nil))
+            (should (lispm-ui-signal-p host-sig))
+            (lispm-ui-effect lispm-ui-form--all-values-signal
+                             (lambda (vals) (push (alist-get 'host vals) seen)))
+            (lispm-ui-form-set 'host "lispm.org" 'port "9000")
+            (should (equal (lispm-ui-signal-get host-sig) "lispm.org"))
+            (should (equal seen '("lispm.org")))))
+      (kill-buffer buffer)))
+    ;; Pure alert step verification without popup frames:
+  (let* ((buttons '(("Cancel" cancel cancel) ("OK" ok default)))
+         (s0 (lispm-ui-alert--make-state))
+         (s1 (car (lispm-ui-alert--step s0 'tab buttons 'ok 'cancel #'ignore)))
+         (s2 (car (lispm-ui-alert--step s1 'tab buttons 'ok 'cancel #'ignore)))
+         (act (cdr (lispm-ui-alert--step s2 ?\s buttons 'ok 'cancel #'ignore))))
+    (should (eq (lispm-ui-alert--state-focused s1) 'cancel))
+    (should (eq (lispm-ui-alert--state-focused s2) 'ok))
+    (should (equal act '((:flash-press ok))))))
+
+(ert-deftest lispm-ui-test-frp-codex-review-regressions ()
+  "Regression tests for Codex review findings:
+1. Macro hygiene of `lispm-ui-frp-batch' (no variable capture of `outer').
+2. Mid-batch pull (`lispm-ui-signal-get') on a derived signal still runs effects at commit.
+3. Aborted batch recovers graph state without orphaning dirty derived signals.
+4. Form derived `all-values' signal normalizes password vs text fields across buffers.
+5. Form `:on-change' batches initiating field change and dependent field updates."
+  ;; 1. Macro hygiene (`outer' is not captured)
+  (let ((outer 'caller-value))
+    (should (eq (lispm-ui-frp-batch outer) 'caller-value)))
+  ;; 1b. Re-entrant `signal-set' inside an effect maintains topological ordering
+  (let* ((s1 (lispm-ui-signal 1))
+         (s2 (lispm-ui-signal 10))
+         (d2 (lispm-ui-signal-map (lambda (x) (* x 2)) s2))
+         (trace nil))
+    (lispm-ui-effect s1 (lambda (v)
+                          (push (list 'eff1 v) trace)
+                          (when (= v 2)
+                            (lispm-ui-signal-set s2 20))))
+    (lispm-ui-effect (list s1 d2)
+                     (lambda (v1 v2)
+                       (push (list 'eff2 v1 v2) trace)))
+    (lispm-ui-signal-set s1 2)
+    ;; When eff1 sets s2=20, d2 (40) is recomputed before eff2 runs!
+    (should (equal (nreverse trace) '((eff1 2) (eff2 2 40)))))
+  ;; 2. Mid-batch pull still triggers effects
+  (let* ((src (lispm-ui-signal 1))
+         (derived (lispm-ui-signal-map (lambda (x) (* x 10)) src))
+         (seen nil))
+    (lispm-ui-effect derived (lambda (v) (push v seen)))
+    (lispm-ui-frp-batch
+      (lispm-ui-signal-set src 2)
+      (should (= (lispm-ui-signal-get derived) 20)))
+    (should (equal seen '(20)))
+    ;; 3. Aborted batch recovers graph state
+    (ignore-errors
+      (lispm-ui-frp-batch
+        (lispm-ui-signal-set src 3)
+        (error "Abort mid-batch")))
+    (lispm-ui-signal-set src 4)
+    (should (= (lispm-ui-signal-get derived) 40))
+    (should (equal (car seen) 40)))
+  ;; 4 & 5. Form cross-buffer normalization and batched `:on-change'
+  (let ((buffer nil)
+        (snapshots nil))
+    (setq buffer
+          (lispm-ui-form
+           "CodexForm"
+           (list (list 'user :type 'text :label "User" :value "alice"
+                       :on-change (lambda (v)
+                                    (lispm-ui-form-set 'mirror (upcase (or v "")))))
+                 (list 'mirror :type 'text :label "Mirror" :value "ALICE")
+                 (list 'secret :type 'password :label "Secret" :value "  keep-spaces  "))))
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (lispm-ui-effect lispm-ui-form--all-values-signal
+                             (lambda (vals) (push vals snapshots)))
+            (lispm-ui-form--changed 'user "bob"))
+          ;; `:on-change' updated `mirror' inside the same batch as `user':
+          ;; only one committed snapshot should have been emitted, with both updated.
+          (should (= (length snapshots) 1))
+          (should (equal (alist-get 'user (car snapshots)) "bob"))
+          (should (equal (alist-get 'mirror (car snapshots)) "BOB"))
+          ;; Updating password inside a batch that commits outside the form buffer
+          ;; still preserves leading/trailing spaces on the password field:
+          (with-temp-buffer
+            (lispm-ui-frp-batch
+              (with-current-buffer buffer
+                (lispm-ui-form--set-raw-value 'secret "  padded  "))))
+          (should (equal (alist-get 'secret (car snapshots)) "  padded  ")))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer))))
+  ;; 6. Derived signal stays stale if its compute function signals an error
+  (let* ((denom (lispm-ui-signal 1))
+         (quot (lispm-ui-signal-map (lambda (d) (/ 10 d)) denom)))
+    (should (= (lispm-ui-signal-get quot) 10))
+    (should-error (lispm-ui-signal-set denom 0))
+    (should (lispm-ui-signal-stale quot))
+    (should-error (lispm-ui-signal-get quot)))
+  ;; 7. `lispm-ui-effect' validates all sources before attaching subscriptions
+  (let ((valid-sig (lispm-ui-signal 1)))
+    (should-error (lispm-ui-effect (list valid-sig 'not-a-signal) #'ignore)
+                  :type 'lispm-ui-frp-error)
+    (should-not (lispm-ui-signal-effects valid-sig)))
+  ;; 8. `lispm-ui-modal-run' renders immediately even inside an outer `lispm-ui-frp-batch'
+  (let ((events '(step done))
+        (rendered nil))
+    (cl-letf (((symbol-function 'lispm-ui-modal-read)
+               (lambda () (pop events))))
+      (lispm-ui-frp-batch
+        (lispm-ui-modal-run
+         :initial 0
+         :step (lambda (st ev)
+                 (if (eq ev 'step)
+                     (cons (1+ st) nil)
+                   (cons st (list (list :return st)))))
+         :render (lambda (st) (push st rendered)))))
+    (should (equal rendered '(1)))))
+
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

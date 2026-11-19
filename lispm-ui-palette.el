@@ -45,6 +45,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'lispm-ui-base)
+(require 'lispm-ui-frp)
 
 ;;;; Colours
 
@@ -89,6 +90,12 @@ before one is.  See `lispm-ui-derive-palette'.")
 
 (defvar lispm-ui-palette-generation 0
   "Count of palettes derived so far; memoized drawings carry it in their key.")
+
+(defvar lispm-ui-palette-signal (lispm-ui-signal nil #'equal)
+  "Reactive signal holding `lispm-ui-current-palette'.")
+
+(defvar lispm-ui-palette-generation-signal (lispm-ui-signal 0 #'eql)
+  "Reactive signal holding `lispm-ui-palette-generation'.")
 
 (defconst lispm-ui-palette-darkest 0.12
   "The least luminance a palette's chrome and frames are derived from.
@@ -290,6 +297,9 @@ current one, when the theme's colours cannot be read."
                                     (apply #'append (mapcar #'funcall lispm-ui-palette-functions)))
             lispm-ui-palette-generation (1+ lispm-ui-palette-generation))
       (lispm-ui--set-faces)
+      (lispm-ui-frp-batch
+        (lispm-ui-signal-set lispm-ui-palette-signal lispm-ui-current-palette)
+        (lispm-ui-signal-set lispm-ui-palette-generation-signal lispm-ui-palette-generation))
       (run-hooks 'lispm-ui-palette-changed-hook)
       lispm-ui-current-palette)))
 

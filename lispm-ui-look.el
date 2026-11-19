@@ -59,10 +59,19 @@
 (require 'seq)
 (require 'subr-x)
 (require 'lispm-ui-base)
+(require 'lispm-ui-frp)
 
 (defvar lispm-ui-look 'classic
   "The look LispM UI draws in, a name of `lispm-ui-looks' or `classic',
 the look its default methods draw.")
+
+(defvar lispm-ui-look-signal (lispm-ui-signal 'classic #'eq)
+  "Reactive signal holding the active look symbol `lispm-ui-look'.")
+
+(defun lispm-ui-look-set (look)
+  "Set `lispm-ui-look' to LOOK and notify `lispm-ui-look-signal'."
+  (setq lispm-ui-look look)
+  (lispm-ui-signal-set lispm-ui-look-signal look))
 
 (defvar lispm-ui-looks nil
   "The looks defined, as (NAME . PROPERTIES), in the order defined.

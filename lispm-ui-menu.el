@@ -457,17 +457,7 @@ Nothing is run; nil means the menu was cancelled, or had no items."
         (dolist (level levels)
           (lispm-ui-popup-dispose (plist-get level :frame)))))))
 
-(defun lispm-ui-menu--coalesce-mouse-move (event)
-  "Consume queued mouse-movement events and return the latest movement EVENT."
-  (while (and (not noninteractive)
-              (input-pending-p)
-              (let ((next (read-event nil nil 0)))
-                (if (mouse-movement-p next)
-                    (progn (setq event next) t)
-                  (when next
-                    (push next unread-command-events))
-                  nil))))
-  event)
+(defalias 'lispm-ui-menu--coalesce-mouse-move #'lispm-ui-modal-coalesce-mouse-move)
 
 (defun lispm-ui-menu--drain-outside-drag ()
   "Consume drag and movement events after an outside mouse-down until release."

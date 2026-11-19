@@ -212,17 +212,16 @@ by date, the latest first; DESCENDING the other way."
 (defun lispm-ui-file-dialog--type (dialog char)
   "Select DIALOG's first item whose name starts with the letters typed, CHAR
 the last: letters typed within a second of each other make one name."
-  (let ((now (float-time)))
-    (setf (lispm-ui-file-dialog--dialog-typed dialog)
-          (concat (if (< (- now (lispm-ui-file-dialog--dialog-typed-at dialog)) 1.0)
-                      (lispm-ui-file-dialog--dialog-typed dialog)
-                    "")
-                  (downcase (char-to-string char)))
+  (pcase-let ((`(,typed . ,now)
+               (lispm-ui-frp-type-select-step
+                (cons (lispm-ui-file-dialog--dialog-typed dialog)
+                      (lispm-ui-file-dialog--dialog-typed-at dialog))
+                (downcase char) 1.0)))
+    (setf (lispm-ui-file-dialog--dialog-typed dialog) typed
           (lispm-ui-file-dialog--dialog-typed-at dialog) now)
-    (let ((typed (lispm-ui-file-dialog--dialog-typed dialog)))
-      (when-let* ((index (seq-position (lispm-ui-file-dialog--dialog-items dialog) typed
-                                       (lambda (item typed) (string-prefix-p typed (downcase (car item)))))))
-        (lispm-ui-file-dialog--select dialog index)))))
+    (when-let* ((index (seq-position (lispm-ui-file-dialog--dialog-items dialog) typed
+                                     (lambda (item typed) (string-prefix-p typed (downcase (car item)))))))
+      (lispm-ui-file-dialog--select dialog index))))
 
 (defun lispm-ui-file-dialog--places ()
   "Return the usual places, which the Shortcuts button pops up: (NAME . FOLDER)
@@ -769,17 +768,9 @@ cancelled; return the file, or nil."
                   (if (not (lispm-ui-modal-over event frame))
                       'ignore
                     (let ((old (lispm-ui-file-dialog--dialog-top dialog))
-                          (delta wheel)
-                          next next-delta)
-                      (unless noninteractive
-                        (while (and (setq next (lispm-ui-modal-read 0))
-                                    (setq next-delta (lispm-ui-file-dialog--wheel-delta next))
-                                    (= (cl-signum next-delta) (cl-signum delta))
-                                    (lispm-ui-modal-over next frame))
-                          (setq delta (+ delta next-delta)
-                                next nil))
-                        (when next
-                          (push next unread-command-events)))
+                          (delta (lispm-ui-modal-coalesce-wheel
+                                  wheel #'lispm-ui-file-dialog--wheel-delta
+                                  (lambda (ev) (lispm-ui-modal-over ev frame)))))
                       (lispm-ui-file-dialog--scroll-to dialog (+ old delta))
                       (if (= old (lispm-ui-file-dialog--dialog-top dialog))
                           'ignore

@@ -28,7 +28,8 @@
 
 (ert-deftest lispm-finder-test-no-host-references ()
   "Ensure `lispm-finder' contains no references to `lispm-desktop' or `lispm-agents'."
-  (dolist (file '("lispm-finder-i18n.el" "lispm-finder.el"))
+  (dolist (file '("lispm-finder-i18n.el" "lispm-finder.el"
+                  "lispm-finder-render.el" "lispm-finder-choose.el"))
     (with-temp-buffer
       (insert-file-contents (expand-file-name file lispm-finder-test-root))
       (goto-char (point-min))
@@ -195,8 +196,11 @@
 
 (ert-deftest lispm-finder-test-ui-choose-file-registration ()
   "Loading `lispm-finder' sets `lispm-ui-choose-file-function' to `lispm-finder-choose-file'
-and exposes public aliases for external packages."
+and exposes public aliases and keybindings for external packages."
   (should (eq lispm-ui-choose-file-function #'lispm-finder-choose-file))
+  (should (eq (lookup-key lispm-finder-mode-map (kbd "<right>")) #'lispm-finder-select-right))
+  (should (eq (keymap-parent lispm-finder-choose-mode-map) lispm-finder-mode-map))
+  (should (eq (lookup-key lispm-finder-choose-mode-map (kbd "<right>")) #'lispm-finder-select-right))
   (should (fboundp 'lispm-finder-path-items))
   (should (fboundp 'lispm-finder-keyboard-menu))
   (should (fboundp 'lispm-finder-choose-header))
@@ -214,13 +218,30 @@ and exposes public aliases for external packages."
     (should (consp (lispm-finder--draw-footer-button palette 80 "Cancel")))
     (should (consp (lispm-finder--draw-footer-button palette 88 "Choose" :default t :trailing t)))))
 
+(ert-deftest lispm-finder-test-init-choose-buffer-cleans-up-on-error ()
+  "If `lispm-finder--init-choose-buffer' fails mid-init, it kills the newly allocated buffer."
+  (let ((tmp (make-temp-file "lispm-finder-err-" t)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "a.txt" tmp)
+            (insert "x"))
+          (when-let* ((old (get-buffer lispm-finder-choose-buffer-name)))
+            (kill-buffer old))
+          (should-error
+           (lispm-finder--init-choose-buffer
+            tmp "Choose" (lambda (_f) (error "Predicate failed")) nil))
+          (should-not (get-buffer lispm-finder-choose-buffer-name)))
+      (delete-directory tmp t))))
+
 ;;; Internationalization
 
 (defun lispm-finder-test--messages ()
   "Return the messages `lispm-finder' gives to translate."
   (lispm-kit-i18n-messages
    (list (expand-file-name "lispm-finder-i18n.el" lispm-finder-test-root)
-         (expand-file-name "lispm-finder.el" lispm-finder-test-root))
+         (expand-file-name "lispm-finder.el" lispm-finder-test-root)
+         (expand-file-name "lispm-finder-render.el" lispm-finder-test-root)
+         (expand-file-name "lispm-finder-choose.el" lispm-finder-test-root))
    :tr 'lispm-finder-tr
    :tr-n 'lispm-finder-tr-n
    :tr-in 'lispm-finder-tr-in

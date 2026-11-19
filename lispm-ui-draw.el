@@ -58,6 +58,22 @@ which it cannot show: the text under it shows instead, where
         ((stringp svg) (create-image svg 'svg t :ascent 'center :scale 1))
         (t (svg-image svg :ascent 'center :scale 1))))
 
+(defun lispm-ui-image--evict-stale (&optional generation)
+  "Evict cached images from older palette generations than GENERATION."
+  (let ((gen (or generation lispm-ui-palette-generation)))
+    (maphash (lambda (k _v)
+               (when (and (consp k) (integerp (car k)) (not (eql (car k) gen)))
+                 (remhash k lispm-ui--images)))
+             lispm-ui--images)))
+
+(defvar lispm-ui-image--evict-effect nil
+  "Active `lispm-ui-effect' evicting stale-generation images.")
+
+(when lispm-ui-image--evict-effect
+  (lispm-ui-effect-dispose lispm-ui-image--evict-effect))
+(setq lispm-ui-image--evict-effect
+      (lispm-ui-effect lispm-ui-palette-generation-signal #'lispm-ui-image--evict-stale))
+
 (defun lispm-ui-image (key draw)
   "Return the image of KEY, calling DRAW to make its SVG the first time,
 an SVG of svg.el's or SVG text.  It is made again in a new palette."
@@ -282,6 +298,8 @@ document naming an attribute twice is no document."
 Nil too where Emacs cannot parse XML.  The document is cleaned to be
 printed again, see `lispm-ui--clean-dom'."
   (when (fboundp 'libxml-parse-xml-region)
+    (when (> (hash-table-count lispm-ui--svg-doms) 256)
+      (clrhash lispm-ui--svg-doms))
     (with-memoization (gethash (or data file) lispm-ui--svg-doms)
       (when (or data (file-readable-p file))
         (with-temp-buffer

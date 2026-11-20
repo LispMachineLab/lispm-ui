@@ -255,5 +255,14 @@ and exposes public aliases and keybindings for external packages."
     (should-not (lispm-kit-i18n-problems 'lispm-finder messages
                                          '(nameless missing arguments spelled-as-written spelling)))))
 
+(ert-deftest lispm-finder-test-pure-keyboard-bindings ()
+  "Verify pure-keyboard navigation and modal cancel bindings in Finder and Chooser."
+  (should (eq (keymap-lookup lispm-finder-mode-map "M-<left>") #'lispm-finder-back))
+  (should (eq (keymap-lookup lispm-finder-mode-map "M-<right>") #'lispm-finder-forward))
+  (should (eq (keymap-lookup lispm-finder-choose-mode-map "^") #'lispm-finder-up))
+  (should (eq (keymap-lookup lispm-finder-choose-mode-map "q") #'lispm-finder-choose-cancel))
+  (should (eq (keymap-lookup lispm-finder-choose-mode-map "M-w") #'lispm-finder-choose-cancel))
+  (should (eq (keymap-lookup lispm-finder-choose-mode-map "M-N") #'lispm-finder-new-folder)))
+
 (provide 'lispm-finder-test)
 ;;; lispm-finder-test.el ends here

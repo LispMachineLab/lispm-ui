@@ -782,6 +782,8 @@ with LABEL its name under it; nil where it is not."
   "M-o" #'lispm-finder-open
   "M-<down>" #'lispm-finder-open
   "M-<up>" #'lispm-finder-up
+  "M-<left>" #'lispm-finder-back
+  "M-<right>" #'lispm-finder-forward
   "DEL" #'lispm-finder-up
   "M-[" (lispm-finder--graphic-binding #'lispm-finder-back)
   "M-]" (lispm-finder--graphic-binding #'lispm-finder-forward)

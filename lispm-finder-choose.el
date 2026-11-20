@@ -418,8 +418,11 @@
   "C-c C-k" #'lispm-finder-choose-cancel
   "M-o" #'lispm-finder-choose-open-selected
   "M-<down>" #'lispm-finder-choose-open-selected
+  "^" #'lispm-finder-up
   "/" #'lispm-finder-choose-path-menu
   "~" #'lispm-finder-choose-go-home
+  "q" #'lispm-finder-choose-cancel
+  "M-w" #'lispm-finder-choose-cancel
   "<escape>" #'lispm-finder-choose-cancel
   "C-g" #'lispm-finder-choose-cancel)
 

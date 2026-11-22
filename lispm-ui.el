@@ -4,7 +4,7 @@
 
 ;; Author: Ryan.K
 ;; URL: https://github.com/LispMachineLab/lispm-ui
-;; Version: 0.9.1
+;; Version: 0.10.0
 ;; Package-Requires: ((emacs "30.1"))
 ;; Keywords: convenience, faces, mouse
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
@@ -33,6 +33,11 @@
 ;;                      and lengths drawn in pixels counted in cells there
 ;;   lispm-ui-frp.el    functional reactive programming: glitch-free
 ;;                      push-pull signals, effects, batches, and streams
+;;   lispm-ui-spotlight.el
+;;                      reactive multi-actor buffer spotlights, interval
+;;                      composition, and fading overlays
+;;   lispm-ui-stage.el  reactive adaptive multi-pane stage layout and
+;;                      click-to-zoom window reconciliation
 ;;   lispm-ui-i18n.el   the language its words are shown in, and their
 ;;                      translations, i18n/, which LispM Kit's engine
 ;;                      reads
@@ -111,6 +116,8 @@
 (require 'lispm-ui-form-widgets)
 (require 'lispm-ui-form-dress)
 (require 'lispm-ui-form)
+(require 'lispm-ui-spotlight)
+(require 'lispm-ui-stage)
 
 (provide 'lispm-ui)
 ;;; lispm-ui.el ends here

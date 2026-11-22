@@ -11,6 +11,9 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 * What it holds
 
 | =lispm-ui-base.el=    | where it is; whether a frame is a text terminal, where controls are drawn in text; lengths in pixels, counted in cells there |
+| =lispm-ui-frp.el=     | functional reactive signals, derived behaviors, transactional batches, effects, and event streams                        |
+| =lispm-ui-spotlight.el= | reactive multi-actor buffer spotlights, sweep-line interval composition, and fading overlays                           |
+| =lispm-ui-stage.el=   | reactive adaptive multi-pane stage layout and click-to-zoom window reconciliation                                        |
 | =lispm-ui-i18n.el=    | the language its words are shown in, and their translations, =i18n/=                                                     |
 | =lispm-ui-palette.el= | the colours it draws in, derived from the colour theme, and its faces                                                    |
 | =lispm-ui-look.el=    | the looks it draws in, each the forms of one system's interface, and families of looks drawn alike                      |

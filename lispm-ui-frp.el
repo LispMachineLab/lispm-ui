@@ -158,6 +158,17 @@ Only propagates when the projected value changes under TEST (default `equal')."
 (defvar lispm-ui-frp--variable-watchers (make-hash-table :test #'eq)
   "Active variable watchers installed by `lispm-ui-signal-watch-variable'.")
 
+(defun lispm-ui-frp--variable-nonlocal-value (variable)
+  "Return VARIABLE's current non-buffer-local value, or nil if unbound."
+  (cond
+   ((and (local-variable-p variable)
+         (default-boundp variable))
+    (default-value variable))
+   ((boundp variable)
+    (symbol-value variable))
+   ((default-boundp variable)
+    (default-value variable))))
+
 (defun lispm-ui-signal-watch-variable (variable &optional signal test)
   "Bind VARIABLE's value to source SIGNAL (or a fresh one with TEST).
 When VARIABLE is updated (`setq', `set-default', Customize) or dynamically
@@ -169,7 +180,7 @@ runs effects with the incoming signal value before the binding mutates.
 Return SIGNAL."
   (unless (symbolp variable)
     (signal 'lispm-ui-frp-error (list "Not a variable symbol" variable)))
-  (let* ((initial (and (boundp variable) (symbol-value variable)))
+  (let* ((initial (lispm-ui-frp--variable-nonlocal-value variable))
          (sig (or signal (lispm-ui-signal initial test)))
          (applying nil))
     (unless (lispm-ui-signal-source-p sig)
@@ -195,7 +206,7 @@ Return SIGNAL."
                          (setq applying nil))))))
       (puthash variable watcher lispm-ui-frp--variable-watchers)
       (add-variable-watcher variable watcher))
-    (lispm-ui-signal-set sig (and (boundp variable) (symbol-value variable)))
+    (lispm-ui-signal-set sig (lispm-ui-frp--variable-nonlocal-value variable))
     sig))
 
 (defun lispm-ui-signal-unwatch-variable (variable)

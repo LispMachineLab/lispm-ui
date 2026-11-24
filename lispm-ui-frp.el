@@ -185,9 +185,11 @@ Return SIGNAL."
                            (progn
                              ;; Pre-commit NEWVAL for non-buffer-local `set' so
                              ;; effects reading SYM observe NEWVAL without
-                             ;; clobbering a buffer-local binding on `set-default'.
+                             ;; creating or clobbering a buffer-local binding
+                             ;; on `set-default'.
                              (when (and (eq operation 'set)
-                                        (not (local-variable-p sym)))
+                                        (not (local-variable-p sym))
+                                        (not (local-variable-if-set-p sym)))
                                (set sym newval))
                              (lispm-ui-signal-set sig newval))
                          (setq applying nil))))))

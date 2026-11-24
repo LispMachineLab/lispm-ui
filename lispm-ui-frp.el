@@ -160,14 +160,9 @@ Only propagates when the projected value changes under TEST (default `equal')."
 
 (defun lispm-ui-frp--variable-nonlocal-value (variable)
   "Return VARIABLE's current non-buffer-local value, or nil if unbound."
-  (cond
-   ((and (local-variable-p variable)
-         (default-boundp variable))
-    (default-value variable))
-   ((boundp variable)
-    (symbol-value variable))
-   ((default-boundp variable)
-    (default-value variable))))
+  (if (local-variable-p variable)
+      (and (default-boundp variable) (default-value variable))
+    (and (boundp variable) (symbol-value variable))))
 
 (defun lispm-ui-signal-watch-variable (variable &optional signal test)
   "Bind VARIABLE's value to source SIGNAL (or a fresh one with TEST).

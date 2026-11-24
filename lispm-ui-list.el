@@ -141,7 +141,8 @@ When FILTER-SIGNAL and PREDICATE are given, items are filtered by
 `(funcall PREDICATE item filter-value)' when filter-value is non-nil.
 When SORT-SIGNAL and COMPARATOR are given, items are sorted by
 `(funcall COMPARATOR a b sort-value)' on a copy when sort-value is non-nil.
-When PROJECTOR is given, each item is mapped via `(funcall PROJECTOR item)'."
+When PROJECTOR is given, each item is mapped via `(funcall PROJECTOR item)'.
+TEST compares derived row lists for equality (default `equal')."
   (let ((sources (delq nil (list items-signal filter-signal sort-signal))))
     (lispm-ui-signal-derived
      sources

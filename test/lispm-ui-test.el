@@ -3532,15 +3532,32 @@ commits, and disposed effects stop firing."
     (lispm-ui-signal-set state '(:theme platinum :count 2))
     (should (eq (lispm-ui-signal-get theme-sig) 'platinum))
     (should (= theme-hits 1))
+    ;; Alist representation (including leading nil elements and missing keys):
+    (lispm-ui-signal-set state '(nil (:theme . win3) (:count . 3)))
+    (should (eq (lispm-ui-signal-get theme-sig) 'win3))
+    (should-not (lispm-ui-signal-get (lispm-ui-signal-select :missing state)))
     (lispm-ui-effect-dispose eff))
-  ;; Variable watcher bridge:
-  (setq lispm-ui-test--watched-var 'alpha)
-  (let ((var-sig (lispm-ui-signal-watch-variable 'lispm-ui-test--watched-var nil #'eq)))
+  ;; Variable watcher bridge (supplied source, setq, effect reads updated var, unwatch):
+  (setq-default lispm-ui-test--watched-var 'alpha)
+  (let* ((supplied (lispm-ui-signal 'init #'eq))
+         (var-sig (lispm-ui-signal-watch-variable 'lispm-ui-test--watched-var supplied #'eq))
+         (observed nil)
+         (eff (lispm-ui-effect
+               var-sig
+               (lambda (v)
+                 ;; Witness that the variable binding itself already holds V when effect runs:
+                 (push (cons v (default-value 'lispm-ui-test--watched-var)) observed)))))
     (unwind-protect
         (progn
+          (should (eq var-sig supplied))
           (should (eq (lispm-ui-signal-get var-sig) 'alpha))
           (setq lispm-ui-test--watched-var 'beta)
+          (should (eq (lispm-ui-signal-get var-sig) 'beta))
+          (should (equal observed '((beta . beta))))
+          (lispm-ui-signal-unwatch-variable 'lispm-ui-test--watched-var)
+          (setq lispm-ui-test--watched-var 'gamma)
           (should (eq (lispm-ui-signal-get var-sig) 'beta)))
+      (lispm-ui-effect-dispose eff)
       (lispm-ui-signal-unwatch-variable 'lispm-ui-test--watched-var)))
   ;; Look signal updates via `lispm-ui-look-set':
   (let ((saved-look lispm-ui-look))
@@ -3572,7 +3589,9 @@ commits, and disposed effects stop firing."
     (lispm-ui-frp-batch
       (lispm-ui-signal-set filter-sig nil)
       (lispm-ui-signal-set sort-sig 'asc))
-    (should (equal (lispm-ui-signal-get rows-sig) '(a b c)))))
+    (should (equal (lispm-ui-signal-get rows-sig) '(a b c)))
+    ;; Even when filter-sig is nil, sorting must not mutate raw-list:
+    (should (equal (mapcar (lambda (x) (plist-get x :id)) raw-list) '(b a c)))))
 
 (ert-deftest lispm-ui-test-frp-streams-and-combinators ()
   "Event streams support `map', `filter', `merge', `fold', and time-windowed

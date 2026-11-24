@@ -132,6 +132,13 @@ their current values whenever any source changes.  TEST defaults to `equal'."
   "Return a derived signal applying FN to the values of SIGNALS."
   (lispm-ui-signal-derived signals fn test))
 
+(defun lispm-ui-frp--alist-p (collection)
+  "Return non-nil when COLLECTION is a proper list of conses or nil entries."
+  (and (consp collection)
+       (proper-list-p collection)
+       (seq-some #'consp collection)
+       (seq-every-p (lambda (item) (or (null item) (consp item))) collection)))
+
 (defun lispm-ui-signal-select (key signal &optional test)
   "Return a derived signal projecting KEY from alist or plist SIGNAL.
 Only propagates when the projected value changes under TEST (default `equal')."
@@ -139,12 +146,10 @@ Only propagates when the projected value changes under TEST (default `equal')."
    (lambda (collection)
      (cond
       ((null collection) nil)
-      ((and (consp collection)
-            (consp (car collection))
-            (assoc key collection))
+      ((lispm-ui-frp--alist-p collection)
        (cdr (assoc key collection)))
-      ((and (listp collection)
-            (plist-member collection key))
+      ((and (proper-list-p collection)
+            (cl-evenp (length collection)))
        (plist-get collection key))
       (t nil)))
    signal
@@ -154,24 +159,33 @@ Only propagates when the projected value changes under TEST (default `equal')."
   "Active variable watchers installed by `lispm-ui-signal-watch-variable'.")
 
 (defun lispm-ui-signal-watch-variable (variable &optional signal test)
-  "Bind Emacs VARIABLE to source SIGNAL (or a fresh one compared with TEST).
-When VARIABLE is set via `setq', `set-default', or Customize, SIGNAL is
-updated to the new value.  Return SIGNAL."
+  "Bind VARIABLE's default value to source SIGNAL (or a fresh one with TEST).
+When VARIABLE's top-level value is set via `setq', `set-default', or Customize,
+SIGNAL is updated with the new value committed to VARIABLE.  Return SIGNAL."
   (unless (symbolp variable)
     (signal 'lispm-ui-frp-error (list "Not a variable symbol" variable)))
-  (let* ((initial (and (boundp variable) (symbol-value variable)))
-         (sig (or signal (lispm-ui-signal initial test))))
+  (let* ((initial (and (default-boundp variable) (default-value variable)))
+         (sig (or signal (lispm-ui-signal initial test)))
+         (applying nil))
     (unless (lispm-ui-signal-source-p sig)
       (signal 'lispm-ui-frp-error (list "Cannot watch into a derived signal" sig)))
-    (lispm-ui-signal-set sig initial)
     (when-let* ((old (gethash variable lispm-ui-frp--variable-watchers)))
       (remove-variable-watcher variable old))
-    (let ((watcher (lambda (_sym newval operation where)
-                     (when (and (memq operation '(set let unlet))
+    (let ((watcher (lambda (sym newval operation where)
+                     (when (and (not applying)
+                                (eq operation 'set)
                                 (null where))
-                       (lispm-ui-signal-set sig newval)))))
+                       (setq applying t)
+                       (unwind-protect
+                           (progn
+                             ;; Commit NEWVAL before flushing signal effects so any
+                             ;; effect reading SYM observes the updated binding.
+                             (set-default sym newval)
+                             (lispm-ui-signal-set sig newval))
+                         (setq applying nil))))))
       (puthash variable watcher lispm-ui-frp--variable-watchers)
       (add-variable-watcher variable watcher))
+    (lispm-ui-signal-set sig (and (default-boundp variable) (default-value variable)))
     sig))
 
 (defun lispm-ui-signal-unwatch-variable (variable)

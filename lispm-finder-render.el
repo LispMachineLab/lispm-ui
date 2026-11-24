@@ -45,6 +45,7 @@
 (defvar lispm-finder--selected)
 (defvar lispm-finder--columns)
 (defvar lispm-finder--choosing)
+(defvar lispm-finder--rendered-key)
 (defvar lispm-finder-tty-p-function)
 (defvar lispm-finder-tty-images-p-function)
 (defvar lispm-finder-tty-images-show-function)
@@ -129,9 +130,20 @@
       (funcall lispm-finder-tty-p-function (or frame (selected-frame)))
     (not (display-graphic-p (or frame (selected-frame))))))
 
+(defvar lispm-finder--fit-cache (make-hash-table :test #'equal)
+  "Fitted item label strings cached by display and font key.")
+
 (defun lispm-finder--fit (string width)
   "Return STRING shortened with an ellipsis to fit WIDTH pixels."
-  (lispm-ui-text-fit string width))
+  (let* ((face (get-text-property 0 'face string))
+         (tty (lispm-finder--tty-p))
+         (key (list (substring-no-properties string) width face tty
+                    (frame-char-width)
+                    lispm-ui-look lispm-ui-palette-generation)))
+    (when (> (hash-table-count lispm-finder--fit-cache) 1024)
+      (clrhash lispm-finder--fit-cache))
+    (or (gethash key lispm-finder--fit-cache)
+        (puthash key (lispm-ui-text-fit string width) lispm-finder--fit-cache))))
 
 (defun lispm-finder--draw-header-ground (svg width palette)
   "Draw on SVG the ground of a header strip WIDTH pixels wide, in PALETTE."
@@ -428,6 +440,24 @@ PROPS returns the text properties of an item, by name.  Return the columns."
     (delq nil (list (get-buffer lispm-finder-choose-buffer-name)
                     (get-buffer lispm-finder-buffer-name)))))
 
+(defun lispm-finder--render-key (window columns)
+  "Return a structural render signature for the current Finder buffer in WINDOW."
+  (let* ((frame (window-frame window))
+         (tty (lispm-finder--tty-p frame)))
+    (list lispm-finder--directory
+          lispm-finder--items
+          lispm-finder--selected
+          columns
+          tty
+          (and tty window)
+          (and tty (window-body-width window))
+          (and tty lispm-finder-tty-images-p-function
+               (funcall lispm-finder-tty-images-p-function))
+          (frame-char-width frame)
+          lispm-ui-look
+          lispm-ui-palette-generation
+          lispm-finder--choosing)))
+
 (defun lispm-finder--render (&rest _)
   "Draw the folder's items as rows of large icons over their names."
   (dolist (buffer (lispm-finder--target-buffers))
@@ -437,43 +467,47 @@ PROPS returns the text properties of an item, by name.  Return the columns."
         (let* ((inhibit-read-only t)
                (cell lispm-finder-cell-width)
                (columns (max 1 (/ (- (window-body-width window t) 12) cell)))
+               (key (lispm-finder--render-key window columns))
                (props #'lispm-finder--item-plist))
-          (setq lispm-finder--columns columns)
-          (erase-buffer)
-          (if (lispm-finder--tty-p (window-frame window))
-              (setq lispm-finder--columns
-                    (funcall (or lispm-finder-text-items-function
-                                 #'lispm-finder--text-items)
-                             window props))
-            (insert (propertize " " 'display '(space :height (12))) "\n"))
-          (dolist (row (unless (lispm-finder--tty-p (window-frame window))
-                         (seq-partition lispm-finder--items columns)))
-            (seq-do-indexed
-             (lambda (item column)
-               (insert (propertize " " 'display
-                                   `(space :align-to (,(+ (lispm-finder--cell-left column)
-                                                          (/ (- cell lispm-finder-icon-size) 2)))))
-                       (apply #'propertize
-                              (lispm-finder--icon (lispm-finder--icon-name lispm-finder--directory item)
-                                                  (equal (car item) lispm-finder--selected))
-                              (funcall props (car item)))))
-             row)
-            (insert "\n")
-            (seq-do-indexed
-             (lambda (item column)
-               (let ((label (lispm-finder--fit
-                             (propertize (concat " " (lispm-finder--sanitize-label (car item)) " ")
-                                         'face (if (equal (car item) lispm-finder--selected)
-                                                   'lispm-finder-label-selected
-                                                 'lispm-finder-label))
-                             (- cell 6))))
+          (unless (and (> (buffer-size) 0)
+                       (equal key lispm-finder--rendered-key))
+            (setq lispm-finder--columns columns)
+            (erase-buffer)
+            (if (lispm-finder--tty-p (window-frame window))
+                (setq lispm-finder--columns
+                      (funcall (or lispm-finder-text-items-function
+                                   #'lispm-finder--text-items)
+                               window props))
+              (insert (propertize " " 'display '(space :height (12))) "\n"))
+            (dolist (row (unless (lispm-finder--tty-p (window-frame window))
+                           (seq-partition lispm-finder--items columns)))
+              (seq-do-indexed
+               (lambda (item column)
                  (insert (propertize " " 'display
                                      `(space :align-to (,(+ (lispm-finder--cell-left column)
-                                                            (/ (- cell (string-pixel-width label))
-                                                               2)))))
-                         (apply #'propertize label (funcall props (car item))))))
-             row)
-            (insert "\n" (propertize " " 'display '(space :height (14))) "\n"))
+                                                            (/ (- cell lispm-finder-icon-size) 2)))))
+                         (apply #'propertize
+                                (lispm-finder--icon (lispm-finder--icon-name lispm-finder--directory item)
+                                                    (equal (car item) lispm-finder--selected))
+                                (funcall props (car item)))))
+               row)
+              (insert "\n")
+              (seq-do-indexed
+               (lambda (item column)
+                 (let ((label (lispm-finder--fit
+                               (propertize (concat " " (lispm-finder--sanitize-label (car item)) " ")
+                                           'face (if (equal (car item) lispm-finder--selected)
+                                                     'lispm-finder-label-selected
+                                                   'lispm-finder-label))
+                               (- cell 6))))
+                   (insert (propertize " " 'display
+                                       `(space :align-to (,(+ (lispm-finder--cell-left column)
+                                                              (/ (- cell (string-pixel-width label))
+                                                                 2)))))
+                           (apply #'propertize label (funcall props (car item))))))
+               row)
+              (insert "\n" (propertize " " 'display '(space :height (14))) "\n"))
+            (setq lispm-finder--rendered-key key))
           (run-hooks 'lispm-finder-rendered-hook)
           (let ((at (or (and lispm-finder--selected
                              (lispm-finder--item-position lispm-finder--selected))

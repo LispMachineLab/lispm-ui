@@ -132,6 +132,12 @@ see `lispm-finder--read-again'.")
 (defvar-local lispm-finder--state-signal nil
   "Reactive `lispm-ui-signal' holding `(DIRECTORY ITEMS SELECTED)' for this buffer.")
 
+(defvar-local lispm-finder--icon-names nil
+  "Hash table caching resolved icon names by `(DIRECTORY . ITEM)'.")
+
+(defvar-local lispm-finder--rendered-key nil
+  "Signature of the last rendered state in this Finder buffer.")
+
 ;;;; Host integration hooks and callbacks
 
 (defvar lispm-finder-show-function nil
@@ -257,7 +263,14 @@ files must satisfy it."
   "Return the name of the large icon of ITEM of DIRECTORY."
   (if (lispm-finder--folder directory)
       (or (nth 1 item) "document-32")
-    (lispm-finder--file-icon-name directory item)))
+    (unless (hash-table-p lispm-finder--icon-names)
+      (setq lispm-finder--icon-names (make-hash-table :test #'equal)))
+    (when (> (hash-table-count lispm-finder--icon-names) 1024)
+      (clrhash lispm-finder--icon-names))
+    (let ((key (cons directory item)))
+      (or (gethash key lispm-finder--icon-names)
+          (puthash key (lispm-finder--file-icon-name directory item)
+                   lispm-finder--icon-names)))))
 
 (defun lispm-finder--file-icon-name (directory item)
   "Return the name of the large icon of ITEM of DIRECTORY, a directory."
@@ -373,7 +386,10 @@ Its value is `(DIRECTORY ITEMS SELECTED)'."
       (setq lispm-finder--directory target-dir
             lispm-finder--items items
             lispm-finder--selected valid-select
-            lispm-finder--selected-app (lispm-finder--app valid-select))
+            lispm-finder--selected-app (lispm-finder--app valid-select)
+            lispm-finder--rendered-key nil)
+      (when (hash-table-p lispm-finder--icon-names)
+        (clrhash lispm-finder--icon-names))
       (when (stringp lispm-finder--directory)
         (setq default-directory lispm-finder--directory))
       (lispm-finder--sync-state-signal)

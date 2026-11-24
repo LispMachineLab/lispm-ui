@@ -264,5 +264,40 @@ and exposes public aliases and keybindings for external packages."
   (should (eq (keymap-lookup lispm-finder-choose-mode-map "M-w") #'lispm-finder-choose-cancel))
   (should (eq (keymap-lookup lispm-finder-choose-mode-map "M-N") #'lispm-finder-new-folder)))
 
+(ert-deftest lispm-finder-test-render-dedup-and-icon-cache ()
+  "Verify repeated `lispm-finder--render' calls at unchanged state skip buffer rebuilds and cache icons."
+  (let ((tmp (make-temp-file "lispm-finder-dedup-" t)))
+    (unwind-protect
+        (save-window-excursion
+          (make-directory (expand-file-name "sub" tmp))
+          (with-temp-file (expand-file-name "one.el" tmp)
+            (insert "(provide 'one)"))
+          (with-temp-file (expand-file-name "two.txt" tmp)
+            (insert "two"))
+          (with-temp-buffer
+            (set-window-buffer (selected-window) (current-buffer))
+            (lispm-finder-mode)
+            (setq lispm-finder--directory (file-name-as-directory tmp)
+                  lispm-finder--items (lispm-finder--read tmp)
+                  lispm-finder--selected "one.el")
+            (let ((icon-lookups 0))
+              (cl-letf* ((orig-file-icon (symbol-function 'lispm-finder--file-icon-name))
+                         ((symbol-function 'lispm-finder--file-icon-name)
+                          (lambda (dir item)
+                            (setq icon-lookups (1+ icon-lookups))
+                            (funcall orig-file-icon dir item))))
+                (lispm-finder--render)
+                (should (= icon-lookups 3))
+                (let ((tick-1 (buffer-chars-modified-tick)))
+                  ;; Second render with identical state skips erase-buffer & icon lookups
+                  (lispm-finder--render)
+                  (should (= (buffer-chars-modified-tick) tick-1))
+                  (should (= icon-lookups 3))
+                  ;; Changing selection triggers a fresh render, but reuses cached icon names
+                  (lispm-finder--select "two.txt")
+                  (should (> (buffer-chars-modified-tick) tick-1))
+                  (should (= icon-lookups 3)))))))
+      (delete-directory tmp t))))
+
 (provide 'lispm-finder-test)
 ;;; lispm-finder-test.el ends here

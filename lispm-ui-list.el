@@ -42,6 +42,7 @@
 (require 'subr-x)
 (require 'svg)
 (require 'lispm-ui-base)
+(require 'lispm-ui-frp)
 (require 'lispm-ui-palette)
 (require 'lispm-ui-draw)
 (require 'lispm-ui-controls)
@@ -128,6 +129,38 @@ On a text terminal it is a character, a cell wide."
     (propertize " " 'display (lispm-ui-image
                               (list 'triangle open)
                               (lambda () (lispm-ui-draw-triangle lispm-ui-current-palette open))))))
+
+;;;; Reactive list derivation
+
+(cl-defun lispm-ui-list-derive (items-signal &key filter-signal sort-signal
+                                             predicate comparator projector
+                                             (test #'equal))
+  "Return a derived `lispm-ui-signal' projecting filtered and sorted rows.
+ITEMS-SIGNAL holds the raw sequence of domain items.
+When FILTER-SIGNAL and PREDICATE are given, items are filtered by
+`(funcall PREDICATE item filter-value)' when filter-value is non-nil.
+When SORT-SIGNAL and COMPARATOR are given, items are sorted by
+`(funcall COMPARATOR a b sort-value)' on a copy when sort-value is non-nil.
+When PROJECTOR is given, each item is mapped via `(funcall PROJECTOR item)'.
+TEST compares derived row lists for equality (default `equal')."
+  (let ((sources (delq nil (list items-signal filter-signal sort-signal))))
+    (lispm-ui-signal-derived
+     sources
+     (lambda (&rest _)
+       (let* ((raw (copy-sequence (or (lispm-ui-signal-get items-signal) nil)))
+              (fval (and filter-signal (lispm-ui-signal-get filter-signal)))
+              (sval (and sort-signal (lispm-ui-signal-get sort-signal)))
+              (filtered (if (and predicate fval)
+                            (seq-filter (lambda (item) (funcall predicate item fval)) raw)
+                          raw))
+              (sorted (if (and comparator sval)
+                          (sort (copy-sequence filtered)
+                                (lambda (a b) (funcall comparator a b sval)))
+                        filtered)))
+         (if projector
+             (mapcar projector sorted)
+           sorted)))
+     test)))
 
 (provide 'lispm-ui-list)
 ;;; lispm-ui-list.el ends here

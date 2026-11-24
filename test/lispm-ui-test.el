@@ -3561,9 +3561,16 @@ commits, and disposed effects stop firing."
             (should (eq (lispm-ui-signal-get var-sig) 'inner)))
           (should (eq lispm-ui-test--watched-var 'beta))
           (should (eq (lispm-ui-signal-get var-sig) 'beta))
+          ;; `set-default' in a buffer with a local binding does not clobber the local binding:
+          (with-temp-buffer
+            (setq-local lispm-ui-test--watched-var 'local-val)
+            (setq-default lispm-ui-test--watched-var 'global-val)
+            (should (eq lispm-ui-test--watched-var 'local-val))
+            (should (eq (default-value 'lispm-ui-test--watched-var) 'global-val))
+            (should (eq (lispm-ui-signal-get var-sig) 'global-val)))
           (lispm-ui-signal-unwatch-variable 'lispm-ui-test--watched-var)
           (setq lispm-ui-test--watched-var 'gamma)
-          (should (eq (lispm-ui-signal-get var-sig) 'beta)))
+          (should (eq (lispm-ui-signal-get var-sig) 'global-val)))
       (lispm-ui-effect-dispose eff)
       (lispm-ui-signal-unwatch-variable 'lispm-ui-test--watched-var)))
   ;; Look signal updates via `lispm-ui-look-set':

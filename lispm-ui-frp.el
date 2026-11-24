@@ -160,9 +160,13 @@ Only propagates when the projected value changes under TEST (default `equal')."
 
 (defun lispm-ui-signal-watch-variable (variable &optional signal test)
   "Bind VARIABLE's value to source SIGNAL (or a fresh one with TEST).
-When VARIABLE is updated at top level (`setq', `set-default', Customize)
-or dynamically bound/unbound (`let' / `unlet'), SIGNAL is kept in sync
-with the active value already committed to VARIABLE.  Return SIGNAL."
+When VARIABLE is updated (`setq', `set-default', Customize) or dynamically
+bound/unbound (`let' / `unlet'), SIGNAL is updated to the new value.
+During top-level non-buffer-local `set' operations, NEWVAL is committed
+to VARIABLE before effects run; during `let', `unlet', or when a buffer
+has a local binding for VARIABLE, Emacs's pre-change watcher contract
+runs effects with the incoming signal value before the binding mutates.
+Return SIGNAL."
   (unless (symbolp variable)
     (signal 'lispm-ui-frp-error (list "Not a variable symbol" variable)))
   (let* ((initial (and (boundp variable) (symbol-value variable)))
@@ -179,10 +183,11 @@ with the active value already committed to VARIABLE.  Return SIGNAL."
                        (setq applying t)
                        (unwind-protect
                            (progn
-                             ;; For `set', commit NEWVAL to the active binding before
-                             ;; flushing effects so observers reading SYM see NEWVAL
-                             ;; without clobbering global default during a dynamic `let'.
-                             (when (eq operation 'set)
+                             ;; Pre-commit NEWVAL for non-buffer-local `set' so
+                             ;; effects reading SYM observe NEWVAL without
+                             ;; clobbering a buffer-local binding on `set-default'.
+                             (when (and (eq operation 'set)
+                                        (not (local-variable-p sym)))
                                (set sym newval))
                              (lispm-ui-signal-set sig newval))
                          (setq applying nil))))))

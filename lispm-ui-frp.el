@@ -184,7 +184,7 @@ Return SIGNAL."
       (remove-variable-watcher variable old))
     (let ((watcher (lambda (sym newval operation where)
                      (when (and (not applying)
-                                (memq operation '(set let unlet))
+                                (memq operation '(set let unlet makunbound))
                                 (null where))
                        (setq applying t)
                        (unwind-protect

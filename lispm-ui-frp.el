@@ -132,6 +132,55 @@ their current values whenever any source changes.  TEST defaults to `equal'."
   "Return a derived signal applying FN to the values of SIGNALS."
   (lispm-ui-signal-derived signals fn test))
 
+(defun lispm-ui-signal-select (key signal &optional test)
+  "Return a derived signal projecting KEY from alist or plist SIGNAL.
+Only propagates when the projected value changes under TEST (default `equal')."
+  (lispm-ui-signal-map
+   (lambda (collection)
+     (cond
+      ((null collection) nil)
+      ((and (consp collection)
+            (consp (car collection))
+            (assoc key collection))
+       (cdr (assoc key collection)))
+      ((and (listp collection)
+            (plist-member collection key))
+       (plist-get collection key))
+      (t nil)))
+   signal
+   test))
+
+(defvar lispm-ui-frp--variable-watchers (make-hash-table :test #'eq)
+  "Active variable watchers installed by `lispm-ui-signal-watch-variable'.")
+
+(defun lispm-ui-signal-watch-variable (variable &optional signal test)
+  "Bind Emacs VARIABLE to source SIGNAL (or a fresh one compared with TEST).
+When VARIABLE is set via `setq', `set-default', or Customize, SIGNAL is
+updated to the new value.  Return SIGNAL."
+  (unless (symbolp variable)
+    (signal 'lispm-ui-frp-error (list "Not a variable symbol" variable)))
+  (let* ((initial (and (boundp variable) (symbol-value variable)))
+         (sig (or signal (lispm-ui-signal initial test))))
+    (unless (lispm-ui-signal-source-p sig)
+      (signal 'lispm-ui-frp-error (list "Cannot watch into a derived signal" sig)))
+    (lispm-ui-signal-set sig initial)
+    (when-let* ((old (gethash variable lispm-ui-frp--variable-watchers)))
+      (remove-variable-watcher variable old))
+    (let ((watcher (lambda (_sym newval operation where)
+                     (when (and (memq operation '(set let unlet))
+                                (null where))
+                       (lispm-ui-signal-set sig newval)))))
+      (puthash variable watcher lispm-ui-frp--variable-watchers)
+      (add-variable-watcher variable watcher))
+    sig))
+
+(defun lispm-ui-signal-unwatch-variable (variable)
+  "Remove any FRP variable watcher attached to VARIABLE."
+  (when-let* ((watcher (gethash variable lispm-ui-frp--variable-watchers)))
+    (remove-variable-watcher variable watcher)
+    (remhash variable lispm-ui-frp--variable-watchers)
+    t))
+
 (defun lispm-ui-signal--recompute (signal)
   "Re-evaluate derived SIGNAL if stale; return non-nil when its value changed."
   (when (and (lispm-ui-signal-derived-p signal)

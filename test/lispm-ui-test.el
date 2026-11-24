@@ -3516,6 +3516,64 @@ commits, and disposed effects stop firing."
     ;; Setting a derived signal signals `lispm-ui-frp-error':
     (should-error (lispm-ui-signal-set d 0) :type 'lispm-ui-frp-error)))
 
+(defvar lispm-ui-test--watched-var 'alpha)
+
+(ert-deftest lispm-ui-test-frp-select-watch-look-and-list-derive ()
+  "Selector lenses, variable watchers, `lispm-ui-look-signal', and
+`lispm-ui-list-derive' propagate deterministically without mutating inputs."
+  (let* ((state (lispm-ui-signal '(:theme dracula :count 1)))
+         (theme-sig (lispm-ui-signal-select :theme state #'eq))
+         (theme-hits 0)
+         (eff (lispm-ui-effect theme-sig (lambda (_) (setq theme-hits (1+ theme-hits))))))
+    (should (eq (lispm-ui-signal-get theme-sig) 'dracula))
+    ;; Updating an unrelated key in state does not fire `theme-sig' observers:
+    (lispm-ui-signal-set state '(:theme dracula :count 2))
+    (should (= theme-hits 0))
+    (lispm-ui-signal-set state '(:theme platinum :count 2))
+    (should (eq (lispm-ui-signal-get theme-sig) 'platinum))
+    (should (= theme-hits 1))
+    (lispm-ui-effect-dispose eff))
+  ;; Variable watcher bridge:
+  (setq lispm-ui-test--watched-var 'alpha)
+  (let ((var-sig (lispm-ui-signal-watch-variable 'lispm-ui-test--watched-var nil #'eq)))
+    (unwind-protect
+        (progn
+          (should (eq (lispm-ui-signal-get var-sig) 'alpha))
+          (setq lispm-ui-test--watched-var 'beta)
+          (should (eq (lispm-ui-signal-get var-sig) 'beta)))
+      (lispm-ui-signal-unwatch-variable 'lispm-ui-test--watched-var)))
+  ;; Look signal updates via `lispm-ui-look-set':
+  (let ((saved-look lispm-ui-look))
+    (unwind-protect
+        (progn
+          (lispm-ui-look-set 'win3)
+          (should (eq lispm-ui-look 'win3))
+          (should (eq (lispm-ui-signal-get lispm-ui-look-signal) 'win3)))
+      (lispm-ui-look-set saved-look)))
+  ;; Relational list derivation (filter + non-destructive sort + projection):
+  (let* ((raw-list (list '(:id b :score 20) '(:id a :score 10) '(:id c :score 30)))
+         (items-sig (lispm-ui-signal raw-list))
+         (filter-sig (lispm-ui-signal 15))
+         (sort-sig (lispm-ui-signal 'desc))
+         (rows-sig (lispm-ui-list-derive
+                    items-sig
+                    :filter-signal filter-sig
+                    :sort-signal sort-sig
+                    :predicate (lambda (item min-score)
+                                 (>= (plist-get item :score) min-score))
+                    :comparator (lambda (x y dir)
+                                  (if (eq dir 'desc)
+                                      (> (plist-get x :score) (plist-get y :score))
+                                    (< (plist-get x :score) (plist-get y :score))))
+                    :projector (lambda (item) (plist-get item :id)))))
+    (should (equal (lispm-ui-signal-get rows-sig) '(c b)))
+    ;; Original caller list is never mutated in place:
+    (should (equal (mapcar (lambda (x) (plist-get x :id)) raw-list) '(b a c)))
+    (lispm-ui-frp-batch
+      (lispm-ui-signal-set filter-sig nil)
+      (lispm-ui-signal-set sort-sig 'asc))
+    (should (equal (lispm-ui-signal-get rows-sig) '(a b c)))))
+
 (ert-deftest lispm-ui-test-frp-streams-and-combinators ()
   "Event streams support `map', `filter', `merge', `fold', and time-windowed
 `buffer-within' accumulation."

@@ -3554,6 +3554,13 @@ commits, and disposed effects stop firing."
           (setq lispm-ui-test--watched-var 'beta)
           (should (eq (lispm-ui-signal-get var-sig) 'beta))
           (should (equal observed '((beta . beta))))
+          ;; Dynamic `let' + inner `setq' restores signal on `unlet':
+          (let ((lispm-ui-test--watched-var 'temp))
+            (should (eq (lispm-ui-signal-get var-sig) 'temp))
+            (setq lispm-ui-test--watched-var 'inner)
+            (should (eq (lispm-ui-signal-get var-sig) 'inner)))
+          (should (eq lispm-ui-test--watched-var 'beta))
+          (should (eq (lispm-ui-signal-get var-sig) 'beta))
           (lispm-ui-signal-unwatch-variable 'lispm-ui-test--watched-var)
           (setq lispm-ui-test--watched-var 'gamma)
           (should (eq (lispm-ui-signal-get var-sig) 'beta)))

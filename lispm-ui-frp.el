@@ -159,12 +159,13 @@ Only propagates when the projected value changes under TEST (default `equal')."
   "Active variable watchers installed by `lispm-ui-signal-watch-variable'.")
 
 (defun lispm-ui-signal-watch-variable (variable &optional signal test)
-  "Bind VARIABLE's default value to source SIGNAL (or a fresh one with TEST).
-When VARIABLE's top-level value is set via `setq', `set-default', or Customize,
-SIGNAL is updated with the new value committed to VARIABLE.  Return SIGNAL."
+  "Bind VARIABLE's value to source SIGNAL (or a fresh one with TEST).
+When VARIABLE is updated at top level (`setq', `set-default', Customize)
+or dynamically bound/unbound (`let' / `unlet'), SIGNAL is kept in sync
+with the active value already committed to VARIABLE.  Return SIGNAL."
   (unless (symbolp variable)
     (signal 'lispm-ui-frp-error (list "Not a variable symbol" variable)))
-  (let* ((initial (and (default-boundp variable) (default-value variable)))
+  (let* ((initial (and (boundp variable) (symbol-value variable)))
          (sig (or signal (lispm-ui-signal initial test)))
          (applying nil))
     (unless (lispm-ui-signal-source-p sig)
@@ -173,19 +174,21 @@ SIGNAL is updated with the new value committed to VARIABLE.  Return SIGNAL."
       (remove-variable-watcher variable old))
     (let ((watcher (lambda (sym newval operation where)
                      (when (and (not applying)
-                                (eq operation 'set)
+                                (memq operation '(set let unlet))
                                 (null where))
                        (setq applying t)
                        (unwind-protect
                            (progn
-                             ;; Commit NEWVAL before flushing signal effects so any
-                             ;; effect reading SYM observes the updated binding.
-                             (set-default sym newval)
+                             ;; For `set', commit NEWVAL to the active binding before
+                             ;; flushing effects so observers reading SYM see NEWVAL
+                             ;; without clobbering global default during a dynamic `let'.
+                             (when (eq operation 'set)
+                               (set sym newval))
                              (lispm-ui-signal-set sig newval))
                          (setq applying nil))))))
       (puthash variable watcher lispm-ui-frp--variable-watchers)
       (add-variable-watcher variable watcher))
-    (lispm-ui-signal-set sig (and (default-boundp variable) (default-value variable)))
+    (lispm-ui-signal-set sig (and (boundp variable) (symbol-value variable)))
     sig))
 
 (defun lispm-ui-signal-unwatch-variable (variable)

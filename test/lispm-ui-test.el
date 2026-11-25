@@ -3889,5 +3889,78 @@ alert and hold modal state machines transition purely."
         (should (= (length (plist-get (nth 2 top-items) :submenu)) 20))
         (should (= (length (plist-get (nth 3 top-items) :submenu)) 15))))))
 
+(ert-deftest lispm-ui-test-form-select-paste-replace ()
+  "Selecting and pasting into a form field replaces its text and leaves point
+at the end for editing, even when `delete-selection-mode' is nil."
+  (let* ((lispm-ui-current-palette nil)
+         (transient-mark-mode t)
+         (delete-selection-mode nil)
+         (paste-text "grok-5.5")
+         (paste-sym 'lispm-ui-test--paste-stub)
+         (buffer (lispm-ui-form "Model Setup"
+                                '((model :type text :label "Model" :value "gpt-6-sol")
+                                  (secret :type password :label "The key" :value "old-secret")))))
+    (defalias paste-sym (lambda () (interactive) (insert-for-yank paste-text)))
+    (put paste-sym 'delete-selection (lambda () 'yank))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (keymap-local-set "M-v" paste-sym)
+          (let* ((model (alist-get 'model lispm-ui-form--widgets))
+                 (start (widget-field-start model)))
+            ;; M-a selects full field text rather than running backward-sentence.
+            (goto-char start)
+            (execute-kbd-macro (kbd "M-a"))
+            (should (region-active-p))
+            (should (= (region-beginning) start))
+            (should (= (region-end) (+ start (length "gpt-6-sol"))))
+            ;; Pasting via C-y replaces selection cleanly and places point at end.
+            (kill-new "grok-5.5")
+            (execute-kbd-macro (kbd "C-y"))
+            (should (equal (lispm-ui-form-value 'model) "grok-5.5"))
+            (should (= (point) (widget-field-text-end model)))
+            ;; Deleting character-by-character removes newly pasted characters, leaving nothing of old value.
+            (execute-kbd-macro (kbd "DEL DEL"))
+            (should (equal (lispm-ui-form-value 'model) "grok-5"))
+            (should (= (point) (widget-field-text-end model)))
+            ;; Double-click select + M-v paste replaces full field value.
+            (lispm-ui-test--form-mouse 'double-mouse-1 (1+ start))
+            (should (region-active-p))
+            (setq paste-text "gpt-5.4")
+            (execute-kbd-macro (kbd "M-v"))
+            (should (equal (lispm-ui-form-value 'model) "gpt-5.4"))
+            (should (= (point) (widget-field-text-end model)))
+            (execute-kbd-macro (kbd "DEL"))
+            (should (equal (lispm-ui-form-value 'model) "gpt-5."))
+            ;; Mouse drag starting in padding to before field start clamps selection inside editable bounds.
+            (let ((pad (+ start 20)))
+              (lispm-ui-test--form-mouse 'drag-mouse-1 pad (max (point-min) (- start 4)))
+              (should (region-active-p))
+              (should (= (region-beginning) start))
+              (should (= (region-end) (widget-field-text-end model)))
+              (setq paste-text (propertize "grok-5.5" 'face 'bold 'lispm-ui-form-padding t))
+              (execute-kbd-macro (kbd "M-v"))
+              (should (equal (lispm-ui-form-value 'model) "grok-5.5"))
+              (should-not (get-text-property start 'face))
+              (should-not (get-text-property start 'lispm-ui-form-padding)))
+            ;; Selecting and typing replaces instead of prepending.
+            (execute-kbd-macro (kbd "M-a"))
+            (execute-kbd-macro (kbd "x"))
+            (should (equal (lispm-ui-form-value 'model) "x"))
+            ;; Password field replacement preserves masking and replaces value cleanly.
+            (let* ((secret (alist-get 'secret lispm-ui-form--widgets))
+                   (sec-start (widget-field-start secret)))
+              (goto-char sec-start)
+              (execute-kbd-macro (kbd "M-a"))
+              (kill-new "new-secret")
+              (execute-kbd-macro (kbd "C-y"))
+              (should (equal (lispm-ui-form-value 'secret) "new-secret"))
+              (should (equal (lispm-ui-test--form-text 'secret) (make-string 10 ?*)))
+              (execute-kbd-macro (kbd "DEL DEL"))
+              (should (equal (lispm-ui-form-value 'secret) "new-secr")))))
+      (fmakunbound paste-sym)
+      (setplist paste-sym nil)
+      (kill-buffer buffer))))
+
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

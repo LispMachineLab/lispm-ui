@@ -31,6 +31,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'delsel)
 (require 'seq)
 (require 'subr-x)
 (require 'wid-edit)
@@ -381,6 +382,51 @@ typed standing for itself, which Emacs's widgets take for none."
 
 ;;;; Cursor & mouse handling
 
+(defun lispm-ui-form--field-limit (field)
+  "Return the editable upper bound of one-line FIELD, excluding padding."
+  (let ((start (widget-field-start field))
+        (end (widget-field-end field)))
+    (or (and start end (text-property-any start end 'lispm-ui-form-padding t))
+        (widget-field-text-end field))))
+
+(defun lispm-ui-form--clamp-field-selection (field)
+  "Clamp point and any active mark into one-line FIELD's editable text."
+  (when-let* (((memq (widget-type field) '(editable-field lispm-ui-form-password)))
+              (start (widget-field-start field))
+              (limit (lispm-ui-form--field-limit field)))
+    (goto-char (min limit (max start (point))))
+    (when (use-region-p)
+      (set-marker (mark-marker) (min limit (max start (mark t)))))))
+
+(defun lispm-ui-form-select-field ()
+  "Select the whole value of the text field at point."
+  (interactive)
+  (when-let* ((field (widget-field-find (point)))
+              ((memq (widget-type field) '(editable-field lispm-ui-form-password text)))
+              (start (widget-field-start field))
+              (end (if (eq (widget-type field) 'text)
+                       (widget-field-end field)
+                     (widget-field-text-end field))))
+    (goto-char end)
+    (lispm-ui-form--keep-point)
+    (push-mark start t t)
+    (activate-mark)
+    (setq deactivate-mark nil)))
+
+(defun lispm-ui-form--replace-marked ()
+  "Replace an active selection inside a text field before typing or pasting.
+Runs on `pre-command-hook' in `lispm-ui-form-mode' so selection
+replacement works even when global `delete-selection-mode' is off."
+  (when (and (not delete-selection-mode) (use-region-p))
+    (let* ((beg (region-beginning))
+           (end (region-end))
+           (field (widget-field-find beg)))
+      (when (and field
+                 (eq field (widget-field-find end))
+                 (memq (widget-type field) '(editable-field lispm-ui-form-password text)))
+        (let ((delete-selection-mode t))
+          (delete-selection-pre-hook))))))
+
 (defun lispm-ui-form--keep-point ()
   "Keep point out of the padding of the text field it is in: at the end of
 what the field holds, where a dialog's field keeps it, the field scrolled
@@ -392,9 +438,13 @@ after each command in a form's buffer."
       (setq field nil))
     (when-let* ((field)
                 (padding (text-property-any (widget-field-start field) (widget-field-end field)
-                                            'lispm-ui-form-padding t))
-                ((< padding (point))))
-      (goto-char padding))
+                                            'lispm-ui-form-padding t)))
+      (when (< padding (point))
+        (goto-char padding))
+      (when (and (use-region-p)
+                 (eq field (widget-field-find (mark t)))
+                 (< padding (mark t)))
+        (set-marker (mark-marker) padding)))
     (setq lispm-ui-form--field-at-point field)
     (when (and left (not (eq left field)) (widget-field-start left))
       (lispm-ui-form--shape-field left))
@@ -495,8 +545,11 @@ else, nothing, point and the region staying where they are."
             (lispm-ui-form--press-button window button position event)))
          ((memq 'down modifiers)
           (select-window window)
-          (widget-button-click event))
-         ((memq 'drag modifiers) (mouse-set-region event))
+          (widget-button-click event)
+          (lispm-ui-form--clamp-field-selection widget))
+         ((memq 'drag modifiers)
+          (mouse-set-region event)
+          (lispm-ui-form--clamp-field-selection widget))
          (t (mouse-set-point event t)))))))
 
 (defun lispm-ui-form--shape-area (widget)

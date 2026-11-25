@@ -3765,5 +3765,129 @@ alert and hold modal state machines transition purely."
          :render (lambda (st) (push st rendered)))))
     (should (equal rendered '(1)))))
 
+(ert-deftest lispm-ui-test-ask-string-passwd-number ()
+  "Verify `lispm-ui-read-string', `lispm-ui-read-passwd', and `lispm-ui-read-number'."
+  ;; 1. Modal prompt path via `lispm-ui-form-prompt-function':
+  (let* ((calls nil)
+         (lispm-ui-form-prompt-function
+          (lambda (prompt &rest args)
+            (push (cons prompt args) calls)
+            (cond ((equal prompt "Port: ") "9090")
+                  ((plist-get args :on-change)
+                   (funcall (plist-get args :on-change) "live")
+                   "final")
+                  (t "secret"))))
+         (live nil))
+    (should (equal (lispm-ui-read-string "Query: " :initial "q"
+                                         :on-change (lambda (v) (setq live v)))
+                   "final"))
+    (should (equal live "live"))
+    (should (equal (lispm-ui-read-passwd "Token: " t) "secret"))
+    (should (= (length calls) 3))
+    (should (= (lispm-ui-read-number "Port: " 8080) 9090)))
+  ;; 2. Minibuffer fallback path:
+  (let ((lispm-ui-form-prompt-function nil)
+        (lispm-ui-current-palette nil)
+        (seen nil))
+    (cl-letf (((symbol-function 'lispm-ui-popup-available-p) (lambda () nil))
+              ((symbol-function 'read-string)
+               (lambda (prompt &rest _) (push prompt seen) "plain"))
+              ((symbol-function 'completing-read)
+               (lambda (prompt &rest _) (push prompt seen) "picked"))
+              ((symbol-function 'read-passwd)
+               (lambda (prompt &rest _) (push prompt seen) "pw"))
+              ((symbol-function 'read-number)
+               (lambda (prompt &rest _) (push prompt seen) 42)))
+      (should (equal (lispm-ui-read-string "Name: ") "plain"))
+      (should (equal (lispm-ui-read-string "Model: " :choices '("a" "b") :default "a") "picked"))
+      (should (equal (lispm-ui-read-passwd "Secret: ") "pw"))
+      (should (= (lispm-ui-read-number "Count: " 1) 42))
+      (should (= (length seen) 4)))))
+
+(ert-deftest lispm-ui-test-form-modal-and-save-file ()
+  "Verify `lispm-ui-form-modal', `lispm-ui-choose-directory', and `lispm-ui-save-file'."
+  ;; 1. Multi-field `lispm-ui-form-modal' submit and cancel:
+  (let ((lispm-ui-current-palette (lispm-ui-test--classic-palette))
+        (opened-buffer nil)
+        (action 'submit))
+    (cl-letf (((symbol-function 'widget-image-find)
+               (lambda (image) (and (eq (car-safe image) 'image) image)))
+              (lispm-ui-form-modal-function nil)
+              (lispm-ui-form-modal-show-function
+               (lambda (buffer) (setq opened-buffer buffer) nil))
+              ((symbol-function 'recursive-edit)
+               (lambda ()
+                 (with-current-buffer opened-buffer
+                   (if (eq action 'submit)
+                       (lispm-ui-form-submit)
+                     (lispm-ui-form-cancel))))))
+      (should (equal (lispm-ui-form-modal
+                      "Login" '((user :type text :label "User" :value "ada")))
+                     '((user . "ada"))))
+      (setq action 'cancel)
+      (should (eq (condition-case nil
+                      (progn
+                        (lispm-ui-form-modal
+                         "Login" '((user :type text :label "User" :value "ada")))
+                        nil)
+                    (quit 'quitted))
+                  'quitted))))
+  ;; 2. `lispm-ui-form-prompt' forwards `:on-change' into `:value' field:
+  (let ((lispm-ui-current-palette (lispm-ui-test--classic-palette))
+        (opened-buffer nil)
+        (observed nil))
+    (cl-letf (((symbol-function 'widget-image-find)
+               (lambda (image) (and (eq (car-safe image) 'image) image)))
+              (lispm-ui-form-prompt-function nil)
+              (lispm-ui-form-modal-show-function
+               (lambda (buffer) (setq opened-buffer buffer) nil))
+              ((symbol-function 'recursive-edit)
+               (lambda ()
+                 (with-current-buffer opened-buffer
+                   (lispm-ui-form--changed :value "typed")
+                   (lispm-ui-form-submit)))))
+      (should (equal (lispm-ui-form-prompt
+                      "Find:" :on-change (lambda (v) (push v observed)))
+                     "typed"))
+      (should (equal observed '("typed")))))
+  ;; 3. `lispm-ui-choose-directory' and `lispm-ui-save-file':
+  (let ((asked nil))
+    (let ((lispm-ui-choose-file-function
+           (lambda (&rest args) (setq asked args) "/tmp/")))
+      (should (equal (lispm-ui-choose-directory :title "Folder" :directory "/tmp/") "/tmp/"))
+      (should (eq (plist-get asked :predicate) #'file-directory-p)))
+    (let ((lispm-ui-save-file-function
+           (lambda (&rest args) (setq asked args) "/tmp/out.txt")))
+      (should (equal (lispm-ui-save-file :title "Export" :directory "/tmp/" :name "out.txt")
+                     "/tmp/out.txt"))
+      (should (equal (plist-get asked :name) "out.txt")))
+    (let ((lispm-ui-save-file-function nil))
+      (cl-letf (((symbol-function 'read-file-name)
+                 (lambda (_prompt dir _def _mustmatch init)
+                   (expand-file-name init dir))))
+        (should (equal (lispm-ui-save-file :directory "/tmp/" :name "note.txt")
+                       (expand-file-name "note.txt" "/tmp/")))))))
+
+(ert-deftest lispm-ui-test-choose-default-grouped-search ()
+  "Verify `lispm-ui-choose-default' groups >30 choices and supports Search…."
+  (let ((choices (mapcar (lambda (i) (cons i (format "Item %02d" i)))
+                         (number-sequence 1 35)))
+        (lispm-ui-current-palette (lispm-ui-test--classic-palette))
+        (seen-items nil)
+        (menu-answers (list (list :label "Search…" :value :lispm-ui-choose-search)))
+        (lispm-ui-form-prompt-function (lambda (&rest _) "item 24")))
+    (cl-letf (((symbol-function 'lispm-ui-popup-available-p) (lambda () t))
+              ((symbol-function 'lispm-ui-menu-choose)
+               (lambda (items &rest _)
+                 (push items seen-items)
+                 (pop menu-answers))))
+      (should (equal (lispm-ui-choose-default choices nil nil "Pick:") '(24)))
+      (let ((top-items (car seen-items)))
+        (should (equal (plist-get (car top-items) :label) "Search…"))
+        (should (eq (nth 1 top-items) 'separator))
+        (should (= (length (nthcdr 2 top-items)) 2))
+        (should (= (length (plist-get (nth 2 top-items) :submenu)) 20))
+        (should (= (length (plist-get (nth 3 top-items) :submenu)) 15))))))
+
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

@@ -34,15 +34,25 @@
 ;;                    one of CHOICES, as a pop-up menu offers them
 ;;   (lispm-ui-choose-file :title :file :directory :predicate :preview)
 ;;                    a file, as a dialog shows a folder's
+;;   (lispm-ui-choose-directory :title :directory)
+;;                    a folder, as a dialog shows folders
+;;   (lispm-ui-save-file :title :directory :name)
+;;                    a destination file path, as a save dialog asks
+;;   (lispm-ui-read-string PROMPT :initial :default :choices :require-match :validate :on-change)
+;;                    a string, in a modal form or the minibuffer
+;;   (lispm-ui-read-passwd PROMPT CONFIRM DEFAULT)
+;;                    a password, masked in a modal form or the minibuffer
+;;   (lispm-ui-read-number PROMPT DEFAULT)
+;;                    a number, checked in a modal form or the minibuffer
 ;;
 ;; Each is answered in the minibuffer, and never in the system's own
 ;; dialogs, unless something draws it: `lispm-ui-alert-function',
-;; `lispm-ui-choose-function' and `lispm-ui-choose-file-function' are
-;; called instead when set, with the same arguments, and return what
-;; these do.  An alert, choices and a file are drawn by LispM UI itself,
-;; by default, once it has a palette to draw in, see lispm-ui-alert.el,
-;; lispm-ui-menu.el and lispm-ui-file-dialog.el.  The keyboard answers
-;; each, whatever draws it.
+;; `lispm-ui-choose-function', `lispm-ui-choose-file-function' and
+;; `lispm-ui-save-file-function' are called instead when set, with the
+;; same arguments, and return what these do.  An alert, choices and a
+;; file are drawn by LispM UI itself, by default, once it has a palette
+;; to draw in, see lispm-ui-alert.el, lispm-ui-menu.el and
+;; lispm-ui-file-dialog.el.  The keyboard answers each, whatever draws it.
 
 ;;; Code:
 
@@ -54,7 +64,19 @@
 (require 'lispm-ui-palette)
 (require 'lispm-ui-popup)
 
+(defvar lispm-ui-form-prompt-function nil
+  "Optional function overriding `lispm-ui-form-prompt'.
+When non-nil, called with (PROMPT &key INITIAL DEFAULT PASSWORD CHOICES
+REQUIRE-MATCH VALIDATE CHOOSE-DIRECTORY ON-CHANGE).")
+
+(defvar lispm-ui-form-modal-function nil
+  "Optional function overriding `lispm-ui-form-modal'.
+When non-nil, called with (TITLE FIELDS &key VALUES SUBMIT CANCEL INTRO
+SETUP).")
+
 (autoload 'lispm-ui-form-prompt "lispm-ui-form")
+(autoload 'lispm-ui-form-modal "lispm-ui-form")
+(autoload 'lispm-ui-save-file-default "lispm-ui-form")
 
 ;;;; Alerts
 
@@ -206,6 +228,133 @@ else read in the minibuffer, never in the system's own panel."
                  :predicate predicate :preview preview)
       (lispm-ui--choose-file-in-minibuffer title file directory predicate))))
 
+(cl-defun lispm-ui-choose-directory (&key title directory)
+  "Show folders to choose one of; return the folder chosen, or nil.
+TITLE titles the dialog, by default \"Choose a Folder\".  DIRECTORY is
+the starting directory, by default `default-directory'."
+  (lispm-ui-choose-file :title (or title (lispm-ui-tr "Choose a Folder"))
+                        :directory directory
+                        :predicate #'file-directory-p))
+
+(defvar lispm-ui-save-file-function #'lispm-ui-save-file-default
+  "Function asking where to save a file, or nil for the minibuffer.
+It is called with the keyword arguments of `lispm-ui-save-file', and
+returns what it returns.")
+
+(defun lispm-ui--save-file-in-minibuffer (title directory name)
+  "Read a destination file in the minibuffer for TITLE in DIRECTORY.
+NAME is the initial file name.  Never opens a system dialog box."
+  (condition-case nil
+      (let* ((use-dialog-box nil)
+             (chosen (read-file-name (format-prompt title nil)
+                                     directory nil nil name)))
+        (and chosen (expand-file-name chosen)))
+    (quit nil)))
+
+(cl-defun lispm-ui-save-file (&key title directory name)
+  "Ask where to save a file; return the file path, or nil.
+TITLE titles the dialog, by default \"Save File\".  DIRECTORY is the
+starting directory, by default `default-directory'.  NAME is the initial
+file name.  Shown by `lispm-ui-save-file-function', else read in the
+minibuffer."
+  (let ((title (or title (lispm-ui-tr "Save File")))
+        (directory (or directory default-directory)))
+    (if lispm-ui-save-file-function
+        (funcall lispm-ui-save-file-function
+                 :title title :directory directory :name name)
+      (lispm-ui--save-file-in-minibuffer title directory name))))
+
+;;;; Text, password and number prompts
+
+(defun lispm-ui--prompt-shown-p ()
+  "Return non-nil when prompts show in a modal form rather than the minibuffer."
+  (or (bound-and-true-p lispm-ui-form-prompt-function)
+      (lispm-ui-popup-available-p)))
+
+(defun lispm-ui--form-read-passwd (prompt &optional confirm default)
+  "Read a password for PROMPT in `lispm-ui-form-prompt'.
+When CONFIRM is non-nil, prompt twice and require matching passwords.
+DEFAULT is used when submitted empty."
+  (if (not confirm)
+      (lispm-ui-form-prompt prompt :default default :password t)
+    (let ((first (lispm-ui-form-prompt prompt :default default :password t)))
+      (lispm-ui-form-prompt
+       prompt :default default :password t
+       :validate (lambda (val)
+                   (unless (equal (or val default "") first)
+                     (lispm-ui-tr "%s: fill this in"
+                                  (lispm-ui--clean-prompt prompt)))))
+      first)))
+
+(defun lispm-ui--form-read-number (prompt &optional default)
+  "Read a number for PROMPT in `lispm-ui-form-prompt', defaulting to DEFAULT."
+  (let* ((def-str (and default (format "%s" (if (consp default) (car default) default))))
+         (text (lispm-ui-form-prompt
+                prompt
+                :default def-str
+                :validate (lambda (val)
+                            (let ((s (or val def-str "")))
+                              (unless (string-match-p
+                                       "\\`[ \t]*[-+]?[0-9]*\\.?[0-9]+\\([eE][-+]?[0-9]+\\)?[ \t]*\\'"
+                                       s)
+                                (lispm-ui-tr "%s: fill this in"
+                                             (lispm-ui--clean-prompt prompt))))))))
+    (string-to-number text)))
+
+(cl-defun lispm-ui-read-string (prompt &key initial default choices
+                                       require-match validate on-change)
+  "Ask PROMPT for a string and return the string entered.
+INITIAL is the initial text; DEFAULT is used when submitted empty.
+CHOICES offers preset candidates; REQUIRE-MATCH requires picking one.
+VALIDATE checks the value and returns an error string or nil.
+ON-CHANGE, if non-nil, is called with the live text as it changes.
+Uses a modal form when available, else reads in the minibuffer."
+  (if (lispm-ui--prompt-shown-p)
+      (let ((lispm-ui--intercepting t)
+            (lispm-ui-in-gui-action t))
+        (lispm-ui-form-prompt prompt
+                              :initial initial :default default
+                              :choices choices :require-match require-match
+                              :validate validate :on-change on-change))
+    (let ((result
+           (cond
+            (choices
+             (completing-read (format-prompt (lispm-ui--clean-prompt prompt) default)
+                              choices nil require-match initial nil default))
+            (on-change
+             (minibuffer-with-setup-hook
+                 (lambda ()
+                   (add-hook 'after-change-functions
+                             (lambda (&rest _)
+                               (funcall on-change (minibuffer-contents-no-properties)))
+                             nil t))
+               (read-string prompt initial nil default)))
+            (t
+             (read-string prompt initial nil default)))))
+      (when validate
+        (when-let* ((problem (funcall validate result)))
+          (user-error "%s" problem)))
+      result)))
+
+(defun lispm-ui-read-passwd (prompt &optional confirm default)
+  "Ask PROMPT for a password, masking input, and return the string entered.
+When CONFIRM is non-nil, ask twice to confirm.  DEFAULT is used when
+submitted empty.  Uses a modal form when available, else `read-passwd'."
+  (if (lispm-ui--prompt-shown-p)
+      (let ((lispm-ui--intercepting t)
+            (lispm-ui-in-gui-action t))
+        (lispm-ui--form-read-passwd prompt confirm default))
+    (read-passwd prompt confirm default)))
+
+(defun lispm-ui-read-number (prompt &optional default)
+  "Ask PROMPT for a number, optionally defaulting to DEFAULT.
+Uses a modal form when available, else `read-number'."
+  (if (lispm-ui--prompt-shown-p)
+      (let ((lispm-ui--intercepting t)
+            (lispm-ui-in-gui-action t))
+        (lispm-ui--form-read-number prompt default))
+    (read-number prompt default)))
+
 ;;;; Intercepting GUI prompts
 
 (defvaralias 'lispm-ui-intercepting 'lispm-ui--intercepting)
@@ -281,16 +430,7 @@ else read in the minibuffer, never in the system's own panel."
            (lispm-ui-popup-available-p))
       (let ((lispm-ui--intercepting t)
             (lispm-ui-in-gui-action t))
-        (if (not confirm)
-            (lispm-ui-form-prompt prompt :default default :password t)
-          (let ((first (lispm-ui-form-prompt prompt :default default :password t)))
-            (lispm-ui-form-prompt
-             prompt :default default :password t
-             :validate (lambda (val)
-                         (unless (equal (or val default "") first)
-                           (lispm-ui-tr "%s: fill this in"
-                                        (lispm-ui--clean-prompt prompt)))))
-            first)))
+        (lispm-ui--form-read-passwd prompt confirm default))
     (funcall orig-fn prompt confirm default)))
 
 (defun lispm-ui--intercept-read-number (orig-fn prompt &optional default hist)
@@ -298,20 +438,9 @@ else read in the minibuffer, never in the system's own panel."
   (if (and (not lispm-ui--intercepting)
            (lispm-ui-gui-action-p)
            (lispm-ui-popup-available-p))
-      (let* ((lispm-ui--intercepting t)
-             (lispm-ui-in-gui-action t)
-             (def-str (and default (format "%s" (if (consp default) (car default) default))))
-             (text (lispm-ui-form-prompt
-                    prompt
-                    :default def-str
-                    :validate (lambda (val)
-                                (let ((s (or val def-str "")))
-                                  (unless (string-match-p
-                                           "\\`[ \t]*[-+]?[0-9]*\\.?[0-9]+\\([eE][-+]?[0-9]+\\)?[ \t]*\\'"
-                                           s)
-                                    (lispm-ui-tr "%s: fill this in"
-                                                 (lispm-ui--clean-prompt prompt))))))))
-        (string-to-number text))
+      (let ((lispm-ui--intercepting t)
+            (lispm-ui-in-gui-action t))
+        (lispm-ui--form-read-number prompt default))
     (funcall orig-fn prompt default hist)))
 
 (defun lispm-ui--completion-candidates (collection predicate)

@@ -54,6 +54,8 @@
 (require 'lispm-ui-modal)
 (require 'lispm-ui-popup)
 
+(declare-function lispm-ui-form-prompt "lispm-ui-form-dress" (prompt &rest args))
+
 (defface lispm-ui-menu-item '((t :inherit lispm-ui-title))
   "Face of a menu item, the system font's, as a menu bar title's."
   :group 'lispm-ui)
@@ -684,12 +686,56 @@ When TARGET-PARENT is nil, walk up to FRAME's top-level ancestor frame."
       (list :x (+ (lispm-ui-menu--target-dx target) (car xy) (car edges))
             :y (+ (lispm-ui-menu--target-dy target) (cdr xy) (cadr edges) drop)))))
 
+(defun lispm-ui-menu--choose-groups (choices current &optional size)
+  "Split CHOICES into submenu groups of SIZE items, marking CURRENT."
+  (let ((chunk-size (max 1 (or size 20)))
+        (rest choices)
+        (groups nil))
+    (while rest
+      (let* ((chunk (seq-take rest chunk-size))
+             (first-label (cdar chunk))
+             (last-label (cdar (last chunk)))
+             (label (if (cdr chunk)
+                        (format "%s … %s" first-label last-label)
+                      first-label)))
+        (push (list :label label
+                    :submenu (mapcar (pcase-lambda (`(,value . ,text))
+                                       (list :label text :value value
+                                             :checked (equal value current)))
+                                     chunk))
+              groups)
+        (setq rest (nthcdr chunk-size rest))))
+    (nreverse groups)))
+
+(defun lispm-ui-menu--choose-search (choices current position label)
+  "Ask a search query for CHOICES and choose from matching items.
+CURRENT, POSITION and LABEL are passed through to `lispm-ui-choose-default'."
+  (when-let* ((query (condition-case nil
+                         (lispm-ui-form-prompt (or label (lispm-ui-tr "Choose")))
+                       (quit nil))))
+    (let* ((words (split-string (downcase query) "[ ,]+" t))
+           (matches (if (null words)
+                        choices
+                      (seq-filter (pcase-lambda (`(,_ . ,text))
+                                    (let ((haystack (downcase text)))
+                                      (seq-every-p (lambda (w) (string-search w haystack))
+                                                   words)))
+                                  choices))))
+      (cond
+       ((null matches)
+        (user-error (lispm-ui-tr "No match for %s") query))
+       ((null (cdr matches))
+        (list (caar matches)))
+       (t
+        (lispm-ui-choose-default matches current position label))))))
+
 (defun lispm-ui-choose-default (choices &optional current position label)
   "Open a menu of CHOICES, a list of (VALUE . TEXT), at POSITION, by default
 point, CURRENT's item checked; return (VALUE) of the item chosen, or nil.
-Where no menu can be drawn, the choices are read in the minibuffer, after
-LABEL.  This is how `lispm-ui-choose' shows choices, unless
-`lispm-ui-choose-function' says otherwise."
+When CHOICES holds more than thirty items, show Search… above grouped
+submenus.  Where no menu can be drawn, the choices are read in the
+minibuffer, after LABEL.  This is how `lispm-ui-choose' shows choices,
+unless `lispm-ui-choose-function' says otherwise."
   (if (not (lispm-ui-popup-available-p))
       (let ((text (completing-read (format-prompt (or label "") (cdr (assoc current choices)))
                                    (mapcar #'cdr choices) nil t nil nil
@@ -703,13 +749,22 @@ LABEL.  This is how `lispm-ui-choose' shows choices, unless
            (target (lispm-ui-menu--popup-target frame lispm-ui-menu-parent))
            (anchor (lispm-ui-menu--choose-anchor win position target))
            (lispm-ui-menu-parent (lispm-ui-menu--target-parent target))
-           (item (lispm-ui-menu-choose
-                  (mapcar (pcase-lambda (`(,value . ,text))
-                            (list :label text :value value :checked (equal value current)))
-                          choices)
-                  (plist-get anchor :x)
-                  (plist-get anchor :y))))
-      (and item (list (plist-get item :value))))))
+           (menu-items (if (> (length choices) 30)
+                           (cons (list :label (lispm-ui-tr "Search…")
+                                       :value :lispm-ui-choose-search)
+                                 (cons 'separator
+                                       (lispm-ui-menu--choose-groups choices current)))
+                         (mapcar (pcase-lambda (`(,value . ,text))
+                                   (list :label text :value value :checked (equal value current)))
+                                 choices)))
+           (item (lispm-ui-menu-choose menu-items
+                                       (plist-get anchor :x)
+                                       (plist-get anchor :y))))
+      (cond
+       ((null item) nil)
+       ((eq (plist-get item :value) :lispm-ui-choose-search)
+        (lispm-ui-menu--choose-search choices current position label))
+       (t (list (plist-get item :value)))))))
 
 (provide 'lispm-ui-menu)
 ;;; lispm-ui-menu.el ends here

@@ -56,13 +56,14 @@
   '("      #" "     ##" "    ###" "   ####" "  #####" " ######" "#######")
   "The glyph of a list's sort-direction button, a row of pixels a string.")
 
-(cl-defgeneric lispm-ui-draw-list-header (palette columns &optional label-x)
+(cl-defgeneric lispm-ui-draw-list-header (palette columns &optional label-x descending)
   "Return an SVG of a list's row of column headings, in PALETTE.
 COLUMNS lists (LABEL WIDTH SORTED [X]) from left to right; a
 sixteen-pixel sort-direction button ends the row.  Each heading is a
 bevelled cell, its label in the list's font X pixels in, by default
 LABEL-X or eight; the heading of the SORTED column is drawn pushed in
-and darker, as Mac OS 9 drew the column a list was sorted by."
+and darker, as Mac OS 9 drew the column a list was sorted by.
+When DESCENDING is non-nil, the sort glyph points upward."
   (let* ((h lispm-ui-list-header-height)
          (width (+ 16 (apply #'+ (mapcar #'cadr columns))))
          (svg (svg-create width h))
@@ -86,9 +87,33 @@ and darker, as Mac OS 9 drew the column a list was sorted by."
         (lispm-ui-svg-content svg label (+ x (or x-in label-x 8)) 1 (- h 3)
                               (plist-get palette :text) 'lispm-ui-list))
       (setq x (+ x w)))
-    (lispm-ui-svg-pixel-map svg (- width 12) 7 lispm-ui-list--sort-glyph
+    (lispm-ui-svg-pixel-map svg (- width 12) 7
+                            (if descending
+                                (reverse lispm-ui-list--sort-glyph)
+                              lispm-ui-list--sort-glyph)
                             `((?# . ,(plist-get palette :text))))
     svg))
+
+(defun lispm-ui-list-header (columns &optional label-x descending)
+  "Return a list's column heading bar for COLUMNS as a string displaying it.
+COLUMNS, LABEL-X and DESCENDING are as `lispm-ui-draw-list-header' takes them.
+On a text terminal, render text cells with ↑/↓ sort indicator."
+  (if (lispm-ui-tty-p)
+      (concat
+       (mapconcat
+        (pcase-lambda (`(,label ,w ,sorted ,_x-in))
+          (let* ((cols (max 2 (lispm-ui-px w)))
+                 (text (truncate-string-to-width (or label "") (max 1 (- cols 2)) nil nil "…"))
+                 (cell (truncate-string-to-width (concat " " text (make-string cols ?\s)) cols)))
+            (propertize cell 'face (if sorted 'lispm-ui-title 'lispm-ui-list))))
+        columns "")
+       (propertize (if descending " ↑" " ↓") 'face 'lispm-ui-title))
+    (propertize " " 'display
+                (lispm-ui-look-image
+                 (list 'list-header columns label-x descending)
+                 (lambda ()
+                   (lispm-ui-draw-list-header lispm-ui-current-palette
+                                              columns label-x descending))))))
 
 ;;;; Disclosure triangles
 
@@ -126,7 +151,7 @@ turned over its diagonal."
 On a text terminal it is a character, a cell wide."
   (if (lispm-ui-tty-p)
       (if open "▾" "▸")
-    (propertize " " 'display (lispm-ui-image
+    (propertize " " 'display (lispm-ui-look-image
                               (list 'triangle open)
                               (lambda () (lispm-ui-draw-triangle lispm-ui-current-palette open))))))
 
@@ -134,27 +159,29 @@ On a text terminal it is a character, a cell wide."
 
 (cl-defun lispm-ui-list-derive (items-signal &key filter-signal sort-signal
                                              predicate comparator projector
-                                             (test #'equal))
+                                             filter-when (test #'equal))
   "Return a derived `lispm-ui-signal' projecting filtered and sorted rows.
 ITEMS-SIGNAL holds the raw sequence of domain items.
 When FILTER-SIGNAL and PREDICATE are given, items are filtered by
-`(funcall PREDICATE item filter-value)' when filter-value is non-nil.
+`(funcall PREDICATE item filter-value)' when
+`(funcall FILTER-WHEN filter-value)' (default non-nil) holds.
 When SORT-SIGNAL and COMPARATOR are given, items are sorted by
-`(funcall COMPARATOR a b sort-value)' on a copy when sort-value is non-nil.
+`(funcall COMPARATOR a b sort-value)' on a fresh copy when non-nil.
 When PROJECTOR is given, each item is mapped via `(funcall PROJECTOR item)'.
 TEST compares derived row lists for equality (default `equal')."
-  (let ((sources (delq nil (list items-signal filter-signal sort-signal))))
+  (let ((sources (delq nil (list items-signal filter-signal sort-signal)))
+        (filter-pred (or filter-when #'identity)))
     (lispm-ui-signal-derived
      sources
      (lambda (&rest _)
-       (let* ((raw (copy-sequence (or (lispm-ui-signal-get items-signal) nil)))
+       (let* ((raw (or (lispm-ui-signal-get items-signal) nil))
               (fval (and filter-signal (lispm-ui-signal-get filter-signal)))
               (sval (and sort-signal (lispm-ui-signal-get sort-signal)))
-              (filtered (if (and predicate fval)
+              (filtered (if (and predicate (funcall filter-pred fval))
                             (seq-filter (lambda (item) (funcall predicate item fval)) raw)
-                          raw))
+                          (copy-sequence raw)))
               (sorted (if (and comparator sval)
-                          (sort (copy-sequence filtered)
+                          (sort (if (eq filtered raw) (copy-sequence filtered) filtered)
                                 (lambda (a b) (funcall comparator a b sval)))
                         filtered)))
          (if projector

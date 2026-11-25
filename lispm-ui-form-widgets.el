@@ -367,7 +367,12 @@ shown as stars."
       (delete-region from to)
       (goto-char from)
       (insert stars)
-      (goto-char here))))
+      (goto-char here))
+    ;; Drop plaintext/star undo steps from the current command so undo never
+    ;; leaks plaintext or strips `secret' masking properties.
+    (when (consp buffer-undo-list)
+      (while (and (consp buffer-undo-list) (car buffer-undo-list))
+        (pop buffer-undo-list)))))
 
 (defun lispm-ui-form--password (widget)
   "The text of the password field WIDGET: what its stars stand for, a star
@@ -398,20 +403,62 @@ typed standing for itself, which Emacs's widgets take for none."
     (when (use-region-p)
       (set-marker (mark-marker) (min limit (max start (mark t)))))))
 
+(defun lispm-ui-form--editable-field-at (pos)
+  "Return the editable field widget at POS, or nil."
+  (when-let* ((field (widget-field-find pos))
+              ((memq (widget-type field) '(editable-field lispm-ui-form-password text))))
+    field))
+
 (defun lispm-ui-form-select-field ()
   "Select the whole value of the text field at point."
   (interactive)
-  (when-let* ((field (widget-field-find (point)))
-              ((memq (widget-type field) '(editable-field lispm-ui-form-password text)))
+  (when-let* ((field (lispm-ui-form--editable-field-at (point)))
               (start (widget-field-start field))
               (end (if (eq (widget-type field) 'text)
-                       (widget-field-end field)
+                       (save-excursion
+                         (goto-char (widget-field-end field))
+                         (skip-chars-backward "\n" start)
+                         (point))
                      (widget-field-text-end field))))
     (goto-char end)
     (lispm-ui-form--keep-point)
     (push-mark start t t)
     (activate-mark)
     (setq deactivate-mark nil)))
+
+(defun lispm-ui-form-select-all ()
+  "Select the active field's text if point is in an input, else whole buffer."
+  (interactive)
+  (if (lispm-ui-form--editable-field-at (point))
+      (lispm-ui-form-select-field)
+    (push-mark (point-max) t t)
+    (goto-char (point-min))))
+
+(defun lispm-ui-form-activate-or-space ()
+  "Insert a space inside text inputs, or press a focused form button/toggle."
+  (interactive)
+  (let ((field (lispm-ui-form--editable-field-at (point)))
+        (widget (widget-at (point))))
+    (cond
+     (field
+      (call-interactively #'self-insert-command))
+     ((and widget (not (memq (widget-type widget) '(editable-field lispm-ui-form-password text))))
+      (widget-button-press (point)))
+     ((button-at (point))
+      (push-button))
+     (t
+      (call-interactively #'self-insert-command)))))
+
+(put 'lispm-ui-form-activate-or-space 'delete-selection
+     (lambda () (and (lispm-ui-form--editable-field-at (point)) t)))
+
+(defun lispm-ui-form--filter-substring (beg end &optional delete)
+  "Filter copied form text from BEG to END, stripping internal properties."
+  (let ((text (buffer-substring--filter beg end delete)))
+    (remove-text-properties 0 (length text)
+                            '(secret nil lispm-ui-form-padding nil)
+                            text)
+    text))
 
 (defun lispm-ui-form--replace-marked ()
   "Replace an active selection inside a text field before typing or pasting.

@@ -32,7 +32,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
-(require 'lispm-ui-frp)
+(require 'lispm-ui-base)
 
 ;;;; Constants & conditions
 

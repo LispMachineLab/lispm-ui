@@ -176,7 +176,7 @@ by date, the latest first; DESCENDING the other way."
     (lispm-ui-file-dialog--sort dialog)
     (lispm-ui-file-dialog--select
      dialog (or (and name (seq-position (lispm-ui-file-dialog--dialog-items dialog) name
-                                        (lambda (item name) (equal (car item) name))))
+                                        (lambda (item n) (equal (car item) n))))
                 0))))
 
 (defun lispm-ui-file-dialog--parent (directory)
@@ -279,6 +279,11 @@ or nil while the dialog stays."
           (lispm-ui-file-dialog--select dialog (1- (length (lispm-ui-file-dialog--dialog-items dialog))))
           nil)
          (?~ (lispm-ui-file-dialog--go dialog "~/") nil)
+         ((and (or ?\C-@ 'M-return 'C-return)
+               (guard (lispm-ui-file-dialog--directory-only-p dialog)))
+          (if (eq event ?\C-@)
+              (progn (lispm-ui-file-dialog--select dialog nil) nil)
+            (file-name-as-directory (lispm-ui-file-dialog--dialog-directory dialog))))
          ((pred characterp)
           (if (and (>= event ?\s) (< event 127) (not (eq event ?/)))
               (progn (lispm-ui-file-dialog--type dialog event) nil)
@@ -585,10 +590,11 @@ and right; the controls as Navigation Services drew them."
 
 (defun lispm-ui-file-dialog--show (frame dialog)
   "Show DIALOG in its popup FRAME, drawn anew."
-  (lispm-ui-popup-fill
-   frame (propertize " " 'display (svg-image (lispm-ui-file-dialog-draw dialog lispm-ui-current-palette)
-                                             :ascent 100 :scale 1)))
-  (redisplay t))
+  (when (frame-live-p frame)
+    (lispm-ui-popup-fill
+     frame (propertize " " 'display (lispm-ui-svg-image
+                                     (lispm-ui-file-dialog-draw dialog lispm-ui-current-palette))))
+    (redisplay t)))
 
 ;;;; The mouse
 
@@ -742,7 +748,14 @@ Return the file chosen, `cancel', or nil while the dialog stays."
               (lispm-ui-file-dialog--drag-thumb
                frame dialog (- y bar-top (car (lispm-ui-file-dialog--thumb dialog height))))))))
        nil)
-      (_ 'ignore))))
+      (_
+       (if-let* (((lispm-ui-file-dialog--directory-only-p dialog))
+                 (pos (lispm-ui-modal-over event frame))
+                 (xy (posn-x-y pos))
+                 ((lispm-ui-modal-inside-p (plist-get (lispm-ui-file-dialog--layout) :rows)
+                                           (car xy) (cdr xy))))
+           (progn (lispm-ui-file-dialog--select dialog nil) nil)
+         'ignore)))))
 
 ;;;; The dialog
 

@@ -68,9 +68,30 @@ the look its default methods draw.")
 (defvar lispm-ui-look-signal (lispm-ui-signal 'classic #'eq)
   "Reactive signal holding the active look symbol `lispm-ui-look'.")
 
+(defvar lispm-ui-look--syncing nil
+  "Non-nil while synchronizing `lispm-ui-look-signal' with `lispm-ui-look'.")
+
+(defun lispm-ui-look--watch (sym newval operation where)
+  "Synchronize `lispm-ui-look-signal' when `lispm-ui-look' changes."
+  (when (and (eq sym 'lispm-ui-look)
+             (null where)
+             (not lispm-ui-look--syncing)
+             (memq operation '(set let unlet makunbound)))
+    (let ((lispm-ui-look--syncing t))
+      (when (and (eq operation 'set)
+                 (not (local-variable-p sym))
+                 (not (local-variable-if-set-p sym)))
+        (set sym newval))
+      (when (and (boundp 'lispm-ui-look-signal)
+                 (lispm-ui-signal-p lispm-ui-look-signal))
+        (lispm-ui-signal-set lispm-ui-look-signal newval)))))
+
+(add-variable-watcher 'lispm-ui-look #'lispm-ui-look--watch)
+
 (defun lispm-ui-look-set (look)
   "Set `lispm-ui-look' to LOOK and notify `lispm-ui-look-signal'."
-  (setq lispm-ui-look look)
+  (let ((lispm-ui-look--syncing t))
+    (setq lispm-ui-look look))
   (lispm-ui-signal-set lispm-ui-look-signal look))
 
 (defvar lispm-ui-looks nil
@@ -95,9 +116,10 @@ PROPERTIES is a plist; LispM UI reads:
 A look may hold properties of its own too, which what defines it reads,
 as the colour theme in its system's colours.  Defining NAME again
 replaces its properties.  Return NAME."
-  (if-let* ((look (assq name lispm-ui-looks)))
-      (setcdr look properties)
-    (setq lispm-ui-looks (append lispm-ui-looks (list (cons name properties)))))
+  (let ((stored (copy-sequence properties)))
+    (if-let* ((look (assq name lispm-ui-looks)))
+        (setcdr look stored)
+      (setq lispm-ui-looks (append lispm-ui-looks (list (cons name stored))))))
   name)
 
 (defun lispm-ui-look-get (property &optional look)

@@ -36,6 +36,8 @@
   :group 'convenience
   :prefix "lispm-ui-")
 
+(define-error 'lispm-ui-error "LispM UI error")
+
 (defconst lispm-ui-directory
   (file-name-directory (or load-file-name buffer-file-name))
   "LispM UI's directory, which holds its Lisp, its catalogs, i18n/, and its
@@ -59,6 +61,13 @@ a gap of fewer none."
 
 (defvar lispm-ui-in-gui-action nil
   "Non-nil while a control, menu item or form button is running its action.")
+
+(defmacro lispm-ui-without-gui-action (&rest body)
+  "Run BODY without routing prompts through GUI dialog interception."
+  (declare (indent 0) (debug t))
+  `(let ((lispm-ui-in-gui-action nil)
+         (lispm-ui--command-from-mouse nil))
+     ,@body))
 
 (defvar lispm-ui-intercept-in-tests nil
   "Non-nil to let GUI interception hooks run even while ERT tests run.")

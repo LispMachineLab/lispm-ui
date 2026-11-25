@@ -276,7 +276,7 @@
                           'lispm-finder-target target
                           'keymap map)
             (apply #'propertize " "
-                   'display (lispm-ui-image
+                   'display (lispm-ui-look-image
                              (list 'finder-footer-btn (lispm-ui-content-key label)
                                    slice-w default state trailing)
                              (lambda ()
@@ -343,7 +343,7 @@
                                                              nil nil "…")
                                    'face 'lispm-finder-toolbar)
                      (propertize " "
-                                 'display (lispm-ui-image
+                                 'display (lispm-ui-look-image
                                            (list 'finder-footer-left left-w
                                                  (lispm-ui-content-key path-text))
                                            (lambda ()
@@ -445,7 +445,7 @@
                   '(nil nil nil)))
          (fitted (lispm-ui-text-fit label (plist-get layout :title))))
     (propertize " " 'display
-                (lispm-ui-image
+                (lispm-ui-look-image
                  (list 'finder-modal-title width (lispm-ui-content-key fitted))
                  (lambda ()
                    (lispm-ui-draw-title-part
@@ -456,24 +456,29 @@
 
 (defun lispm-finder--modal-show-default (buffer title width height)
   "Show modal chooser BUFFER in a centered child frame of WIDTH by HEIGHT."
-  (let* ((parent (selected-frame))
-         (prev-window (selected-window))
-         (pw (frame-pixel-width parent))
-         (ph (frame-pixel-height parent))
-         (left (max 0 (/ (- pw width) 2)))
-         (top (max 0 (/ (- ph height) 3)))
-         (after-make-frame-functions nil)
-         (before-make-frame-hook nil)
-         (frame nil)
-         (ok nil)
-         (cleanup
-          (lambda ()
-            (when (frame-live-p frame)
-              (delete-frame frame t))
-            (when (frame-live-p parent)
-              (select-frame-set-input-focus parent))
-            (when (window-live-p prev-window)
-              (select-window prev-window)))))
+  (let* ((prev-frame (selected-frame))
+         (parent prev-frame)
+         (prev-window (selected-window)))
+    (while (frame-parent parent)
+      (setq parent (frame-parent parent)))
+    (let* ((pw (frame-pixel-width parent))
+           (ph (frame-pixel-height parent))
+           (left (max 0 (/ (- pw width) 2)))
+           (top (max 0 (/ (- ph height) 3)))
+           (after-make-frame-functions nil)
+           (before-make-frame-hook nil)
+           (frame nil)
+           (ok nil)
+           (cleanup
+            (lambda ()
+              (when (frame-live-p frame)
+                (delete-frame frame t))
+              (cond ((frame-live-p prev-frame)
+                     (select-frame-set-input-focus prev-frame))
+                    ((frame-live-p parent)
+                     (select-frame-set-input-focus parent)))
+              (when (window-live-p prev-window)
+                (select-window prev-window)))))
     (unwind-protect
         (progn
           (setq frame (make-frame
@@ -511,7 +516,7 @@
           (setq ok t)
           cleanup)
       (unless ok
-        (funcall cleanup)))))
+        (funcall cleanup))))))
 
 (defun lispm-finder--init-choose-buffer (directory title predicate initial-select)
   "Create and initialize the modal chooser buffer at DIRECTORY."
@@ -544,10 +549,10 @@
   "Choose a file or folder using a modal Finder icon-grid window.
 TITLE titles the window (by default \"Choose a File\", or \"Choose a Folder\"
 when PREDICATE is `file-directory-p').  Starts in FILE's directory with FILE
-selected, else in DIRECTORY (by default `default-directory').  When not on a
-graphic display with a palette, falls back to the minibuffer."
+selected, else in DIRECTORY (by default `default-directory').  When PREVIEW
+is non-nil on a graphic display, delegates to `lispm-ui-file-dialog'; when
+not on a graphic display with a palette, falls back to the minibuffer."
   (require 'lispm-finder)
-  (ignore preview)
   (let* ((dir-only (eq predicate #'file-directory-p))
          (title (or title (if dir-only
                               (lispm-finder-tr "Choose a Folder")
@@ -559,8 +564,13 @@ graphic display with a palette, falls back to the minibuffer."
                           default-directory))))
          (initial-select (and file (not (string-empty-p (file-name-nondirectory file)))
                               (file-name-nondirectory file))))
-    (if (not (lispm-ui-popup-graphic-p))
-        (lispm-ui-choose-file-in-minibuffer title file directory predicate)
+    (cond
+     ((and preview (lispm-ui-popup-graphic-p) (fboundp 'lispm-ui-file-dialog))
+      (lispm-ui-file-dialog :title title :file file :directory directory
+                            :predicate predicate :preview preview))
+     ((not (lispm-ui-popup-graphic-p))
+      (lispm-ui-choose-file-in-minibuffer title file directory predicate))
+     (t
       (let ((buffer nil)
             (cleanup nil)
             (closing nil)
@@ -602,7 +612,7 @@ graphic display with a palette, falls back to the minibuffer."
              (progn
                (unless dir-only
                  (lispm-ui-choose-remember result))
-               result))))))
+               result)))))))
 
 (defalias 'lispm-finder-choose-header #'lispm-finder--choose-header)
 (defalias 'lispm-finder-choose-footer #'lispm-finder--choose-footer)

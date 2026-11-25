@@ -128,7 +128,7 @@
   "Return non-nil when FRAME (by default the selected frame) is a text terminal."
   (if lispm-finder-tty-p-function
       (funcall lispm-finder-tty-p-function (or frame (selected-frame)))
-    (not (display-graphic-p (or frame (selected-frame))))))
+    (lispm-ui-tty-p frame)))
 
 (defvar lispm-finder--fit-cache (make-hash-table :test #'equal)
   "Fitted item label strings cached by display and font key.")
@@ -188,7 +188,7 @@ pixel width of buttons after the strip."
                        (concat (make-string before ?\s) label (make-string cols ?\s)) cols)
                       'face 'lispm-finder-toolbar))
       (propertize " " 'display
-                  (lispm-ui-image
+                  (lispm-ui-look-image
                    (list 'finder-header-strip label width left)
                    (lambda () (lispm-finder-draw-header-strip lispm-ui-current-palette
                                                               width label left)))))))
@@ -223,7 +223,7 @@ When TRAILING-PAD is non-nil, include trailing margin."
               (lispm-ui-text-button label state)
               (if trailing-pad (propertize " " 'face 'lispm-finder-toolbar) ""))
     (propertize " " 'display
-                (lispm-ui-image
+                (lispm-ui-look-image
                  (list 'finder-header-button (lispm-ui-content-key label) state trailing-pad)
                  (lambda () (lispm-finder-draw-header-button lispm-ui-current-palette
                                                              label state trailing-pad))))))

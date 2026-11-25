@@ -299,5 +299,23 @@ and exposes public aliases and keybindings for external packages."
                   (should (= icon-lookups 3)))))))
       (delete-directory tmp t))))
 
+(ert-deftest lispm-finder-test-phase0-validation-and-preview ()
+  "Verify invalid name diagnostics and `:preview t' delegation to `lispm-ui-file-dialog'."
+  (should (equal (lispm-finder--validate-item-name "notes") "notes"))
+  (dolist (bad '("" ".." "a/b"))
+    (let ((err (condition-case e
+                   (progn (lispm-finder--validate-item-name bad) nil)
+                 (user-error (error-message-string e)))))
+      (should (stringp err))
+      (should (string-prefix-p "Invalid name:" err))))
+  (let (delegated)
+    (cl-letf (((symbol-function 'lispm-ui-popup-graphic-p) (lambda () t))
+              ((symbol-function 'lispm-ui-file-dialog)
+               (lambda (&rest args) (setq delegated args) "/tmp/preview.png")))
+      (should (equal (lispm-finder-choose-file :title "Pick" :directory "/tmp/" :preview t)
+                     "/tmp/preview.png"))
+      (should (eq (plist-get delegated :preview) t))
+      (should (equal (plist-get delegated :title) "Pick")))))
+
 (provide 'lispm-finder-test)
 ;;; lispm-finder-test.el ends here

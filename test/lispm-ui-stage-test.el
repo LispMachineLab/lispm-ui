@@ -168,5 +168,49 @@
       (lispm-ui-spotlight-dispose-store store)
       (kill-buffer buf))))
 
+(ert-deftest lispm-ui-stage-test-instance-isolation-and-touch-zoom ()
+  "Separate stages do not hijack windows, `touch-zoom' stays immutable, and timeout is public."
+  (let ((p1 (generate-new-buffer " *p0-s1-p*"))
+        (b1 (generate-new-buffer " *p0-s1-b*"))
+        (p2 (generate-new-buffer " *p0-s2-p*"))
+        (b2 (generate-new-buffer " *p0-s2-b*"))
+        (reconciles 0)
+        s1 s2)
+    (unwind-protect
+        (save-window-excursion
+          (set-frame-size (selected-frame) 220 50)
+          (delete-other-windows)
+          (set-window-buffer (selected-window) p1)
+          (setq s1 (lispm-ui-stage-create
+                    :primary-window-p (lambda (w) (eq (window-buffer w) p1))
+                    :zoom-timeout 1
+                    :on-reconcile (lambda (&rest _) (cl-incf reconciles)))
+                s2 (lispm-ui-stage-create
+                    :primary-window-p (lambda (w) (eq (window-buffer w) p2))))
+          (lispm-ui-stage-set-subject s1 "a")
+          (lispm-ui-stage-present s1 "a" b1 'code t)
+          (should (= (length (lispm-ui-stage-windows s1)) 1))
+          (should (= (length (lispm-ui-stage-windows s2)) 0))
+          ;; Foreign window is ignored by `s2' zoom:
+          (lispm-ui-stage-zoom s2 (get-buffer-window b1))
+          (should-not (lispm-ui-stage-zoomed-p s2))
+          ;; `touch-zoom' replaces zoom struct without triggering `on-reconcile':
+          (let ((win1 (get-buffer-window b1)))
+            (lispm-ui-stage-zoom s1 win1)
+            (let ((before-zoom (lispm-ui-signal-get (lispm-ui-stage-zoom-signal s1)))
+                  (before-reconciles reconciles))
+              (lispm-ui-stage-touch-zoom s1 win1)
+              (let ((after-zoom (lispm-ui-signal-get (lispm-ui-stage-zoom-signal s1))))
+                (should-not (eq before-zoom after-zoom))
+                (should (= reconciles before-reconciles)))
+              (setf (lispm-ui-stage-zoom-last-active
+                     (lispm-ui-signal-get (lispm-ui-stage-zoom-signal s1)))
+                    (- (float-time) 10.0))
+              (lispm-ui-stage-check-timeout s1)
+              (should-not (lispm-ui-stage-zoomed-p s1)))))
+      (when s1 (lispm-ui-stage-dispose s1))
+      (when s2 (lispm-ui-stage-dispose s2))
+      (mapc #'kill-buffer (list p1 b1 p2 b2)))))
+
 (provide 'lispm-ui-stage-test)
 ;;; lispm-ui-stage-test.el ends here

@@ -3962,5 +3962,183 @@ at the end for editing, even when `delete-selection-mode' is nil."
       (setplist paste-sym nil)
       (kill-buffer buffer))))
 
+(ert-deftest lispm-ui-test-phase0-modal-look-and-controls ()
+  "Verify Phase 0 modal ESC/Meta, look cache watcher, and disabled button fixes."
+  ;; 1. Modal keymap preserves M-a while binding <escape>, ESC ESC, and quit:
+  (let ((buf (lispm-ui-form "Modal" '((name :type text :label "Name" :value "hi")))))
+    (unwind-protect
+        (with-current-buffer buf
+          (lispm-ui-form--setup-modal-keymap)
+          (should (eq (key-binding (kbd "M-a")) #'lispm-ui-form-select-field))
+          (should (eq (lookup-key (current-local-map) [remap keyboard-quit]) #'lispm-ui-form-cancel))
+          (should (eq (lookup-key (current-local-map) (kbd "<escape>")) #'lispm-ui-form-cancel))
+          (should (eq (lookup-key (current-local-map) (kbd "ESC ESC")) #'lispm-ui-form-cancel)))
+      (kill-buffer buf)))
+  ;; 2. `lispm-ui-look' variable watcher keeps `lispm-ui-look-signal' synced,
+  ;;    `lispm-ui-look-define' copies properties non-destructively, and
+  ;;    `lispm-ui-look-image' isolates images across looks:
+  (let ((saved-look lispm-ui-look)
+        (props (list :title "Temp" :family 'classic))
+        (lispm-ui--images (make-hash-table :test #'equal))
+        (lispm-ui-current-palette (lispm-ui-test--classic-palette))
+        (drawn 0))
+    (unwind-protect
+        (progn
+          (lispm-ui-look-define 'phase0-temp (car props) (cadr props) (caddr props) (cadddr props))
+          (plist-put props :title "Mutated")
+          (should (equal (lispm-ui-look-get :title 'phase0-temp) "Temp"))
+          (setq lispm-ui-look 'phase0-temp)
+          (should (eq (lispm-ui-signal-get lispm-ui-look-signal) 'phase0-temp))
+          (cl-letf (((symbol-function 'lispm-ui-svg-image) (lambda (svg &rest _) svg)))
+            (let ((a (lispm-ui-look-image '(p0-test) (lambda () (cl-incf drawn) (svg-create 4 4))))
+                  (_ (setq lispm-ui-look 'classic))
+                  (b (lispm-ui-look-image '(p0-test) (lambda () (cl-incf drawn) (svg-create 4 4)))))
+              (should-not (eq a b))
+              (should (= drawn 2)))))
+      (setq lispm-ui-looks (assq-delete-all 'phase0-temp lispm-ui-looks))
+      (setq lispm-ui-look saved-look)))
+  ;; 3. Disabled default push button preserves `:default' and omits `action':
+  (let ((lispm-ui-current-palette (lispm-ui-test--classic-palette))
+        seen)
+    (cl-letf (((symbol-function 'lispm-ui-push-button)
+               (lambda (label &rest args)
+                 (push (cons label args) seen)
+                 (propertize " " 'display `(image :type svg :data ,label)))))
+      (with-temp-buffer
+        (lispm-ui-insert-push-button "Save" #'ignore :default t :disabled t)
+        (should (equal (car seen) '("Save" :default t :state disabled)))
+        (should-not (button-at (point-min)))))))
+
+(ert-deftest lispm-ui-test-phase0-form-regressions ()
+  "Verify Phase 0 form validation, password copy, text-area, SPC, and status redraw."
+  ;; 1. `:validate' runs once per submit; status `:on-change' redraws in place:
+  (let* ((val-calls 0)
+         (status-key-widget nil)
+         (buf (lispm-ui-form
+               "Form"
+               `((name :type text :label "Name" :value "ada"
+                       :validate ,(lambda (_) (cl-incf val-calls) "bad")
+                       :on-change ,(lambda (v) (lispm-ui-form-set 'note (concat "v=" v))))
+                 (flag :type check :text "Check")
+                 (note :type status :value "init")
+                 (area :type text :label "Notes" :lines 3 :value "one\ntwo")
+                 (pw :type password :label "Secret" :value "topsecret")))))
+    (unwind-protect
+        (with-current-buffer buf
+          (should-error (lispm-ui-form-submit) :type 'user-error)
+          (should (= val-calls 1))
+          (setq status-key-widget (alist-get 'name lispm-ui-form--widgets))
+          (lispm-ui-form--changed 'name "grace")
+          (should (memq 'note lispm-ui-form--stale-status))
+          (lispm-ui-form--flush-deferred nil)
+          (should-not lispm-ui-form--stale-status)
+          (should (eq (alist-get 'name lispm-ui-form--widgets) status-key-widget))
+          (should (string-match-p "v=grace" (buffer-string)))
+          ;; `C-x h' inside multi-line `area' excludes trailing synthetic newlines:
+          (let* ((aw (alist-get 'area lispm-ui-form--widgets))
+                 (astart (widget-field-start aw)))
+            (goto-char astart)
+            (lispm-ui-form-select-all)
+            (should (equal (buffer-substring-no-properties (region-beginning) (region-end))
+                           "one\ntwo")))
+          ;; `SPC' on focused checkbox toggles value:
+          (let* ((fw (alist-get 'flag lispm-ui-form--widgets))
+                 (fstart (overlay-start (widget-get fw :button-overlay))))
+            (goto-char fstart)
+            (lispm-ui-form-activate-or-space)
+            (should (lispm-ui-form-value 'flag)))
+          ;; Copying masked password strips `'secret' text:
+          (let* ((pw (alist-get 'pw lispm-ui-form--widgets))
+                 (copied (filter-buffer-substring (widget-field-start pw)
+                                                  (widget-field-text-end pw))))
+            (should-not (string-match-p "topsecret" copied))))
+      (kill-buffer buf)))
+  ;; 2. Ask validation emits clean single-prefix messages:
+  (let ((lispm-ui-current-palette (lispm-ui-test--classic-palette))
+        (seen-validate nil))
+    (cl-letf (((symbol-function 'lispm-ui-popup-available-p) (lambda () t))
+              ((symbol-function 'lispm-ui-form-prompt)
+               (lambda (_p &rest args)
+                 (setq seen-validate (plist-get args :validate))
+                 (or (plist-get args :initial) "42"))))
+      (should (equal (lispm-ui-read-passwd "PIN:" t) "42"))
+      (should (equal (funcall seen-validate "wrong") "Passwords do not match"))
+      (should (= (lispm-ui-read-number "Port:") 42))
+      (should (equal (funcall seen-validate "nan") "Enter a valid number"))
+      (let ((chosen (lispm-ui--prompt-project-directory "Dir:" nil nil)))
+        (should (stringp chosen))
+        (should (equal (funcall seen-validate "/nonexistent-phase0-path-xyz")
+                       "Choose an existing folder"))))))
+
+(ert-deftest lispm-ui-test-phase0-frp-scope-list-and-helpers ()
+  "Verify Phase 0 FRP scope/cycle/batch fixes, list/dialog updates, and new public APIs."
+  ;; 1. `lispm-ui-frp-batch' drops error flush and recovers stale derived signals:
+  (let* ((src (lispm-ui-signal 1))
+         (der (lispm-ui-signal-derived (list src) (lambda (n) (* n 10))))
+         (bad nil))
+    (should (= (lispm-ui-signal-get der) 10))
+    (should-error
+     (lispm-ui-frp-batch
+       (lispm-ui-signal-set src 2)
+       (when (zerop (lispm-ui-signal-get der)) (setq bad t))
+       (error "Abort batch")))
+    (should (= lispm-ui-frp--batch-depth 0))
+    (lispm-ui-signal-set src 3)
+    (should (= (lispm-ui-signal-get der) 30)))
+  ;; 2. Cycle guard triggers `lispm-ui-frp-error':
+  (let* ((lispm-ui-frp-max-flush-steps 5)
+         (a (lispm-ui-signal 0))
+         (eff (lispm-ui-effect a (lambda (n) (lispm-ui-signal-set a (1+ n))))))
+    (unwind-protect
+        (should-error (lispm-ui-signal-set a 1) :type 'lispm-ui-frp-error)
+      (lispm-ui-effect-dispose eff)))
+  ;; 3. `lispm-ui-scope' disposes effects and combinators on kill-buffer:
+  (let* ((raw (lispm-ui-stream))
+         (sig (lispm-ui-signal "a"))
+         (hits 0)
+         (buf (generate-new-buffer " *p0-scope*"))
+         (scope (lispm-ui-scope-attach-buffer (lispm-ui-scope-create) buf)))
+    (lispm-ui-with-scope scope
+      (let* ((mapped (lispm-ui-stream-map #'upcase raw))
+             (folded (lispm-ui-stream-fold #'concat "" mapped)))
+        (lispm-ui-effect (list sig folded) (lambda (_s _f) (cl-incf hits)) t)
+        (lispm-ui-stream-emit raw "x")
+        (should (= hits 2))
+        (should (equal (lispm-ui-signal-get folded) "X"))))
+    (kill-buffer buf)
+    (lispm-ui-stream-emit raw "y")
+    (should (= hits 2)))
+  ;; 4. List derive `:filter-when`, `list-header`, and public helpers:
+  (let* ((items (lispm-ui-signal '("alpha" "beta" "apricot")))
+         (filt (lispm-ui-signal "all"))
+         (der (lispm-ui-list-derive items :filter-signal filt
+                                     :filter-when (lambda (f) (and f (not (equal f "all"))))
+                                     :predicate (lambda (x f) (string-prefix-p f x))))
+         (palette (lispm-ui-test--classic-palette))
+         (lispm-ui-current-palette palette))
+    (should (equal (lispm-ui-signal-get der) '("alpha" "beta" "apricot")))
+    (lispm-ui-signal-set filt "a")
+    (should (equal (lispm-ui-signal-get der) '("alpha" "apricot")))
+    (cl-letf (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) t)))
+      (should (string-match-p "↑" (lispm-ui-list-header '(("Name" 80 t)) nil t)))
+      (should (string-match-p "↓" (lispm-ui-list-header '(("Name" 80 t)) nil nil))))
+    (should (equal (lispm-ui-color-hex "#abc") "#aabbcc"))
+    (should (equal (lispm-ui-without-gui-action lispm-ui-in-gui-action) nil))
+    (cl-letf (((symbol-function 'lispm-ui-text-width) (lambda (s &optional _) (* 8 (length s)))))
+      (should (equal (lispm-ui-text-wrap-pixels "hi\nthere friend" 56) '("hi" "there" "friend"))))
+    (should (eq (car-safe (lispm-ui-image-well nil 32 32)) 'image))
+    (should (fboundp 'lispm-ui-menu-rows))
+    (should (fboundp 'lispm-ui-menu-width))
+    (should (fboundp 'lispm-ui-menu-item-enabled-p)))
+  ;; 5. `directory-only` file dialog chooses current folder via `M-return` or `C-@`:
+  (lispm-ui-test--with-pictures
+    (lispm-ui-test--with-file-dialog-keys
+      (let ((unread-command-events '(M-return)))
+        (should (equal (lispm-ui-file-dialog :directory folder :predicate #'file-directory-p)
+                       (file-name-as-directory (expand-file-name folder)))))
+      (let ((unread-command-events '(?\C-@ return)))
+        (should (equal (lispm-ui-file-dialog :directory folder :predicate #'file-directory-p)
+                       (file-name-as-directory (expand-file-name folder))))))))
+
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

@@ -476,7 +476,7 @@ Its value is `(DIRECTORY ITEMS SELECTED)'."
               (string-empty-p trimmed)
               (member trimmed '("." ".."))
               (string-match-p "[/\\]" trimmed))
-      (user-error (lispm-finder-tr "Nothing can be made or renamed in “%s”") (or name "")))
+      (user-error (lispm-finder-tr "Invalid name: “%s”") (or name "")))
     trimmed))
 
 (defvar lispm-ui-intercepting nil)

@@ -208,6 +208,13 @@ Prefers horizontal (`right') when wide enough, else vertical (`below')."
       (let ((pred (lispm-ui-stage-excluded-window-p stage)))
         (and pred (funcall pred window)))))
 
+(defun lispm-ui-stage--owns-window-p (stage window)
+  "Return non-nil when WINDOW belongs to STAGE (or legacy unstamped stage)."
+  (let ((owner (window-parameter window 'lispm-ui-stage)))
+    (if owner
+        (eq owner stage)
+      (and (window-parameter window 'lispm-stage) t))))
+
 (defun lispm-ui-stage-windows (stage &optional frame)
   "Return live stage windows managed by STAGE on FRAME."
   (let ((f (or frame (lispm-ui-stage--target-frame stage))))
@@ -215,8 +222,7 @@ Prefers horizontal (`right') when wide enough, else vertical (`below')."
       (seq-filter (lambda (w)
                     (and (not (lispm-ui-stage--excluded-p stage w))
                          (not (lispm-ui-stage--primary-p stage w))
-                         (or (eq (window-parameter w 'lispm-ui-stage) stage)
-                             (window-parameter w 'lispm-stage))))
+                         (lispm-ui-stage--owns-window-p stage w)))
                   (window-list f 'nomini)))))
 
 (defun lispm-ui-stage--target-frame (stage &optional subject)
@@ -465,12 +471,12 @@ Prefers horizontal (`right') when wide enough, else vertical (`below')."
     (cond
      ((and need (not (timerp timer)))
       (setf (lispm-ui-stage-zoom-timer stage)
-            (run-at-time 1.0 1.0 #'lispm-ui-stage--check-timeout stage)))
+            (run-at-time 1.0 1.0 #'lispm-ui-stage-check-timeout stage)))
      ((and (not need) (timerp timer))
       (cancel-timer timer)
       (setf (lispm-ui-stage-zoom-timer stage) nil)))))
 
-(defun lispm-ui-stage--check-timeout (stage)
+(defun lispm-ui-stage-check-timeout (stage)
   "Unzoom STAGE when the focused pane has been idle past `zoom-timeout'."
   (let* ((zoom (lispm-ui-signal-get (lispm-ui-stage-zoom-signal stage)))
          (timeout (lispm-ui-stage-zoom-timeout stage))
@@ -483,6 +489,8 @@ Prefers horizontal (`right') when wide enough, else vertical (`below')."
                (>= (- (float-time) (lispm-ui-stage-zoom-last-active zoom))
                    timeout))
       (lispm-ui-stage-unzoom stage t))))
+
+(defalias 'lispm-ui-stage--check-timeout #'lispm-ui-stage-check-timeout)
 
 ;;;; Public reactive API
 
@@ -700,11 +708,21 @@ When REVEAL-POS is an integer, emit `(WINDOW . REVEAL-POS)' on
                                 (cons win reveal-pos)))
         win))))
 
+(defun lispm-ui-stage--refresh-zoom-time (stage zoom)
+  "Update STAGE zoom signal timestamp using a fresh copy of ZOOM."
+  (lispm-ui-signal-set
+   (lispm-ui-stage-zoom-signal stage)
+   (lispm-ui-stage-zoom-create
+    :subject (lispm-ui-stage-zoom-subject zoom)
+    :buffer (lispm-ui-stage-zoom-buffer zoom)
+    :kind (lispm-ui-stage-zoom-kind zoom)
+    :pinned-idle-p (lispm-ui-stage-zoom-pinned-idle-p zoom)
+    :last-active (float-time))))
+
 (defun lispm-ui-stage-zoom (stage window)
   "Zoom stage WINDOW across STAGE's column and freeze background switches."
   (when (and (window-live-p window)
-             (or (eq (window-parameter window 'lispm-ui-stage) stage)
-                 (window-parameter window 'lispm-stage)))
+             (lispm-ui-stage--owns-window-p stage window))
     (let* ((subj (lispm-ui-stage-subject stage))
            (busy (lispm-ui-stage-subject-busy-p stage subj))
            (buf (window-buffer window))
@@ -753,7 +771,7 @@ back to the primary window first."
       (when (and (lispm-ui-stage-zoom-p zoom)
                  (window-live-p win)
                  (eq (window-buffer win) (lispm-ui-stage-zoom-buffer zoom)))
-        (setf (lispm-ui-stage-zoom-last-active zoom) (float-time))))))
+        (lispm-ui-stage--refresh-zoom-time stage zoom)))))
 
 (defun lispm-ui-stage-on-selection-change (stage frame)
   "React to window selection changes on FRAME for STAGE."
@@ -766,11 +784,10 @@ back to the primary window first."
        ((and zoom (lispm-ui-stage--primary-p stage win))
         (lispm-ui-stage-unzoom stage nil))
        ((and (window-live-p win)
-             (or (eq (window-parameter win 'lispm-ui-stage) stage)
-                 (window-parameter win 'lispm-stage))
+             (lispm-ui-stage--owns-window-p stage win)
              (not (lispm-ui-stage--primary-p stage win)))
         (if (and zoom (eq (window-buffer win) (lispm-ui-stage-zoom-buffer zoom)))
-            (setf (lispm-ui-stage-zoom-last-active zoom) (float-time))
+            (lispm-ui-stage--refresh-zoom-time stage zoom)
           (lispm-ui-stage-zoom stage win)))))))
 
 (provide 'lispm-ui-stage)

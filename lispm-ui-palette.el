@@ -61,6 +61,19 @@ show; any other name is resolved by the display."
               '(1 2 3))
     (and color (color-name-to-rgb color))))
 
+(defun lispm-ui-color-hex (color)
+  "Return COLOR normalized as a lowercase `#rrggbb' hex string, or nil."
+  (if (and (stringp color)
+           (string-match "\\`#\\([[:xdigit:]]\\)\\([[:xdigit:]]\\)\\([[:xdigit:]]\\)\\'"
+                         color))
+      (downcase (format "#%s%s%s%s%s%s"
+                        (match-string 1 color) (match-string 1 color)
+                        (match-string 2 color) (match-string 2 color)
+                        (match-string 3 color) (match-string 3 color)))
+    (when-let* ((rgb (lispm-ui-rgb color)))
+      (apply #'format "#%02x%02x%02x"
+             (mapcar (lambda (c) (round (* 255 (max 0.0 (min 1.0 c))))) rgb)))))
+
 (defun lispm-ui-blend (from to ratio)
   "Return the colour RATIO of the way from colour FROM to colour TO.
 Each component is rounded to the nearest of its 256 values, so a blend

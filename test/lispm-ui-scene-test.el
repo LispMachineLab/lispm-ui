@@ -573,7 +573,10 @@
     (let ((chip (lispm-ui-sheet-status-chip '(:state blocked :kind permission))))
       (should (string-match-p "Waiting for approval" chip))
       (should (eq (get-text-property 0 'lispm-ui-sheet-status chip) 'blocked)))
-    (should (imagep (lispm-ui-sheet-portrait-image (list :id "a" :avatar "/missing.svg") 32)))
+    (let ((portrait (lispm-ui-sheet-portrait-image (list :id "a" :avatar "/missing.svg") 32)))
+      (should (eq (car-safe portrait) 'image))
+      (should (eq (plist-get (cdr portrait) :type) 'svg))
+      (should (string-match-p "<svg" (or (plist-get (cdr portrait) :data) ""))))
     (with-temp-buffer
       (lispm-ui-sheet-header "Planner\nOne" (list :id "a")
                              '(:state working) "Step 1\nStep 2" 48)

@@ -23,13 +23,10 @@
 
 ;;; Commentary:
 
-;; LispM's forms were LispM Agent's lispm-form.el before they moved here,
-;; to lispm-ui-form.el.  A program written for them, which requires
-;; `lispm-form', finds this file, and their names as they were: each
-;; function, variable and face of lispm-form.el is the one of
-;; lispm-ui-form.el it became, and a form's mode is a `lispm-form-mode'
-;; too, as `derived-mode-p' asks.  The widgets' properties a program
-;; reads, :lispm-form-key and :lispm-form-control, kept their names.
+;; DEPRECATED in v0.14.0: new applications should require `lispm-ui-form'
+;; (or `lispm-ui') directly.  LispM's forms were LispM Agent's
+;; lispm-form.el before moving to `lispm-ui-form.el'.  Every legacy name
+;; below remains kept as an obsolete compatibility alias for existing callers.
 
 ;;; Code:
 
@@ -43,7 +40,8 @@
                  (lispm-form-cancel . lispm-ui-form-cancel)
                  (lispm-form-choose . lispm-ui-form-choose)
                  (lispm-form-mode . lispm-ui-form-mode)))
-  (defalias (car names) (cdr names)))
+  (defalias (car names) (cdr names))
+  (make-obsolete (car names) (cdr names) "0.14.0"))
 
 (dolist (names '((lispm-form-types . lispm-ui-form-types)
                  (lispm-form-glyph-function . lispm-ui-form-glyph-function)
@@ -58,7 +56,8 @@
                  (lispm-form--title . lispm-ui-form--title)
                  (lispm-form--geometry . lispm-ui-form--geometry)
                  (lispm-form--widgets . lispm-ui-form--widgets)))
-  (defvaralias (car names) (cdr names)))
+  (defvaralias (car names) (cdr names))
+  (make-obsolete-variable (car names) (cdr names) "0.14.0"))
 
 (dolist (names '((lispm-form-title . lispm-ui-form-title)
                  (lispm-form-label . lispm-ui-form-label)

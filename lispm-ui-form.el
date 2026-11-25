@@ -193,6 +193,7 @@ it having changed while it could not be.")
   "The buffer of the form whose field's :on-change is being called, or
 nil: the form is drawn again once it returns, not while it runs.")
 
+(require 'lispm-ui-form-ext)
 (require 'lispm-ui-form-widgets)
 (require 'lispm-ui-form-dress)
 
@@ -265,11 +266,15 @@ TAB and S-TAB go from field to field, \\[lispm-ui-form-submit] submits it,
 (defun lispm-ui-form--normalize-value (key raw &optional fields)
   "Normalize RAW value of field KEY (trimming non-password strings).
 FIELDS defaults to `lispm-ui-form--fields' in the current buffer."
-  (if (stringp raw)
-      (let* ((type (plist-get (cdr (assq key (or fields lispm-ui-form--fields))) :type))
-             (text (if (eq type 'password) raw (string-trim raw))))
-        (and (not (string-empty-p text)) text))
-    raw))
+  (let* ((props (cdr (assq key (or fields lispm-ui-form--fields))))
+         (type (plist-get props :type))
+         (ext (lispm-ui-form--ext-normalize type props raw)))
+    (if (not (eq ext 'no-handler))
+        ext
+      (if (stringp raw)
+          (let ((text (if (eq type 'password) raw (string-trim raw))))
+            (and (not (string-empty-p text)) text))
+        raw))))
 
 (defun lispm-ui-form--init-signals ()
   "Initialize per-field source signals and the derived all-values signal."
@@ -297,7 +302,7 @@ FIELDS defaults to `lispm-ui-form--fields' in the current buffer."
 ;;;; Making a form
 
 (cl-defun lispm-ui-form (title fields &key values submit cancel intro on-submit on-cancel
-                                 instant modal mode setup)
+                                 instant modal mode setup validate-form)
   "Make a form titled TITLE of FIELDS in a buffer of its own; return the buffer.
 FIELDS are as lispm-ui-form.el says.  VALUES, an alist (KEY . VALUE),
 are the fields' values at first, before their :value.  SUBMIT and
@@ -320,14 +325,16 @@ called with no argument in its buffer before it is drawn."
             lispm-ui-form--fields fields
             lispm-ui-form--props (list :submit submit :cancel cancel :intro intro
                                     :on-submit on-submit :on-cancel on-cancel
-                                    :instant instant :modal modal)
+                                    :instant instant :modal modal
+                                    :validate-form validate-form)
             lispm-ui-form--values
             (mapcar (lambda (field)
                       (let ((key (car field)))
                         (cons key (if (assq key values)
                                       (alist-get key values)
-                                    (plist-get (cdr field) :value)))))
+                                    (lispm-ui-form--ext-default (cdr field))))))
                     fields))
+      (lispm-ui-form--ext-init fields lispm-ui-form--values)
       (lispm-ui-form--init-signals)
       (when setup
         (funcall setup))
@@ -422,6 +429,7 @@ not while the text of a field is being changed."
     (unwind-protect
         (lispm-ui-frp-batch
           (lispm-ui-form--set-raw-value key value)
+          (lispm-ui-form--ext-on-change key)
           (when-let* ((on-change (plist-get (cdr (assq key lispm-ui-form--fields)) :on-change)))
             (let ((lispm-ui-form--changing buffer)
                   (lispm-ui-in-gui-action t))
@@ -643,6 +651,7 @@ as it is drawn now."
          (buffer-undo-list t)
          (group nil))
     ;; The fields go first: erasing them would change them otherwise.
+    (lispm-ui-form--ext-clear-handles)
     (setq widget-field-list nil
           widget-field-new nil
           widget-field-last nil
@@ -675,23 +684,32 @@ as it is drawn now."
                (not lispm-ui-form-show-header)
                (not (plist-get lispm-ui-form--props :intro)))
       (insert (propertize "\n" 'face '(:height 0.7))))
-    (dolist (field lispm-ui-form--fields)
-      (when (lispm-ui-form--shown-p field)
-        (pcase (plist-get (cdr field) :type)
-          ('heading
-           (when group (lispm-ui-form--close-group))
-           (lispm-ui-form--open-group (plist-get (cdr field) :label))
-           (setq group t))
-          ('status
-           ;; Its place is kept, to say it again there: its start
-           ;; stays before what is put at its end.
-           (let ((start (point)))
-             (lispm-ui-form--draw-field field group)
-             (push (list (car field) (copy-marker start t) (point-marker) group)
-                   lispm-ui-form--places)))
-          (_ (lispm-ui-form--draw-field field group)))))
+    (let ((skip nil))
+      (dolist (field lispm-ui-form--fields)
+        (when (lispm-ui-form--shown-p field)
+          (pcase (plist-get (cdr field) :type)
+            ('heading
+             (when group (lispm-ui-form--close-group))
+             (let ((lbl (plist-get (cdr field) :label)))
+               (if (plist-get (cdr field) :collapsible)
+                   (progn
+                     (setq skip (lispm-ui-form-section-collapsed-p (car field))
+                           group (not skip))
+                     (lispm-ui-form--open-collapsible-group (car field) lbl skip))
+                 (setq skip nil group t)
+                 (lispm-ui-form--open-group lbl))))
+            ((guard skip) nil)
+            ('status
+             ;; Its place is kept, to say it again there: its start
+             ;; stays before what is put at its end.
+             (let ((start (point)))
+               (lispm-ui-form--draw-field field group)
+               (push (list (car field) (copy-marker start t) (point-marker) group)
+                     lispm-ui-form--places)))
+            (_ (lispm-ui-form--draw-field field group))))))
     (when group (lispm-ui-form--close-group))
     (insert "\n")
+    (lispm-ui-form--insert-form-errors)
     (lispm-ui-form--buttons)
     (widget-setup)
     (lispm-ui-form--shape)
@@ -808,13 +826,18 @@ one; of a form applying its changes at once, the one closing it, if any."
                   (label)
                   (insert (lispm-ui-form--at :control)
                           (propertize line 'wrap-prefix (lispm-ui-form--indent :control)))))))
-        (_ (error "No type of field %S" type)))
+        (_
+         (if-let* ((spec (lispm-ui-form-type-spec type))
+                   (fn (plist-get spec :render)))
+             (funcall fn key field props value label-fn row-fn)
+           (error "No type of field %S" type))))
       (when-let* ((help (let ((help (plist-get props :help)))
                           (if (functionp help) (funcall help (lispm-ui-form--all-values)) help))))
         ;; A line a row.
         (dolist (line (split-string help "\n"))
           (row (lambda ()
-                 (insert (lispm-ui-form--at start) (lispm-ui-form--help line start)))))))))
+                 (insert (lispm-ui-form--at start) (lispm-ui-form--help line start))))))
+      (lispm-ui-form--insert-inline-error key start row-fn))))
 
 (defun lispm-ui-form--help (help at)
   "HELP, a line under a field, as the form shows it from AT, a key of its
@@ -912,26 +935,20 @@ form are told, as when it is drawn."
 
 (defun lispm-ui-form--problem (field)
   "What is wrong with the value of FIELD of the form in this buffer, or nil."
-  (let ((value (lispm-ui-form-value (car field)))
-        (props (cdr field)))
-    (cond ((and (plist-get props :required) (null value))
-           (lispm-ui-tr "%s: fill this in" (or (plist-get props :label) (car field))))
-          ((when-let* ((validate (plist-get props :validate))
-                       (problem (funcall validate value)))
-             (format "%s: %s" (or (plist-get props :label) (car field)) problem))))))
+  (lispm-ui-form--ext-field-error field))
 
 (defun lispm-ui-form-submit ()
   "Submit the form in this buffer: once its values are valid, it is done."
   (interactive)
   (unless (derived-mode-p 'lispm-ui-form-mode)
     (user-error "%s" (lispm-ui-tr "Not a form")))
-  (when-let* ((failure (seq-some (lambda (field)
-                                   (when-let* ((msg (lispm-ui-form--problem field)))
-                                     (cons field msg)))
-                                 (seq-filter #'lispm-ui-form--shown-p lispm-ui-form--fields))))
-    (when-let* ((widget (alist-get (caar failure) lispm-ui-form--widgets)))
-      (goto-char (or (widget-field-start widget) (widget-get widget :from))))
-    (user-error "%s" (cdr failure)))
+  (unless (lispm-ui-form-validate-all)
+    (let ((errs (lispm-ui-form-errors)))
+      (lispm-ui-form--sync-error-overlays)
+      (when-let* ((first-key (caar errs))
+                  (widget (alist-get first-key lispm-ui-form--widgets)))
+        (goto-char (or (widget-field-start widget) (widget-get widget :from))))
+      (user-error "%s" (cdar errs))))
   (let ((buffer (current-buffer))
         (lispm-ui-in-gui-action t))
     (when-let* ((on-submit (plist-get lispm-ui-form--props :on-submit)))

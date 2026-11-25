@@ -8,7 +8,7 @@ FILES = $(wildcard *.el)
 all: test compile
 
 test:
-	$(EMACS) -Q --batch -L . -l test/lispm-kit-test.el -l test/lispm-kit-i18n-test.el -l test/lispm-prebuilt-test.el -l test/lispm-ui-test.el -l test/lispm-ui-stage-test.el -l test/lispm-ui-scene-test.el -f ert-run-tests-batch-and-exit
+	$(EMACS) -Q --batch -L . -l test/lispm-kit-test.el -l test/lispm-kit-i18n-test.el -l test/lispm-prebuilt-test.el -l test/lispm-ui-test.el -l test/lispm-ui-stage-test.el -l test/lispm-ui-scene-test.el -l test/lispm-ui-phase1-test.el -f ert-run-tests-batch-and-exit
 	$(EMACS) -Q --batch -L . -l test/lispm-finder-test.el -f ert-run-tests-batch-and-exit
 
 # A check: the .elc files are removed again, as they would shadow the

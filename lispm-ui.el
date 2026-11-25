@@ -33,6 +33,8 @@
 ;;                      and lengths drawn in pixels counted in cells there
 ;;   lispm-ui-frp.el    functional reactive programming: glitch-free
 ;;                      push-pull signals, effects, batches, and streams
+;;   lispm-ui-frp-async.el
+;;                      async resource signals, debounce/throttle, stores
 ;;   lispm-ui-spotlight.el
 ;;                      reactive multi-actor buffer spotlights, interval
 ;;                      composition, and fading overlays
@@ -54,6 +56,8 @@
 ;;   lispm-ui-palette.el
 ;;                      the colours it draws in, derived from the colour
 ;;                      theme, and its faces
+;;   lispm-ui-tokens.el Design Token 2.0: semantic roles, WCAG contrast,
+;;                      spacing, radius, and typography faces
 ;;   lispm-ui-look.el   the looks it draws in, the forms of one system's
 ;;                      interface or another's
 ;;   lispm-ui-text.el   text laid out in pixels: widths, fitting, aligning
@@ -63,8 +67,12 @@
 ;;                      of drawn images
 ;;   lispm-ui-raster.el pictures drawn in text, in block characters, and
 ;;                      as PNGs, for text terminals
+;;   lispm-ui-icons-catalog.el
+;;                      52 built-in 16x16 stroke vector UI icons
 ;;   lispm-ui-icons.el  icons, found by name: an interface's own, or
 ;;                      the alerts' and files', which LispM UI has
+;;   lispm-ui-view.el   UI buffer hygiene base mode and scroll preservation
+;;   lispm-ui-layout.el compositional stack, card, grid, bar, and split primitives
 ;;   lispm-ui-tabs.el   tab strips and folder-tab panes, drawn and in text
 ;;   lispm-ui-controls.el
 ;;                      its controls: push buttons, pop-up menus, bevel
@@ -104,17 +112,22 @@
 (require 'lispm-kit)
 (require 'lispm-ui-base)
 (require 'lispm-ui-frp)
+(require 'lispm-ui-frp-async)
 (require 'lispm-ui-i18n)
 (require 'lispm-ui-palette)
 (require 'lispm-ui-look)
+(require 'lispm-ui-tokens)
 (require 'lispm-ui-text)
 (require 'lispm-ui-draw)
 (require 'lispm-ui-raster)
+(require 'lispm-ui-icons-catalog)
 (require 'lispm-ui-icons)
 (require 'lispm-ui-modal)
 (require 'lispm-ui-ask)
 (require 'lispm-ui-tabs)
 (require 'lispm-ui-controls)
+(require 'lispm-ui-view)
+(require 'lispm-ui-layout)
 (require 'lispm-ui-list)
 (require 'lispm-ui-scroll)
 (require 'lispm-ui-window)

@@ -4,7 +4,7 @@
 
 ;; Author: Ryan.K
 ;; URL: https://github.com/LispMachineLab/lispm-ui
-;; Version: 0.12.0
+;; Version: 0.13.0
 ;; Package-Requires: ((emacs "30.1"))
 ;; Keywords: convenience, faces, mouse
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
@@ -38,6 +38,16 @@
 ;;                      composition, and fading overlays
 ;;   lispm-ui-stage.el  reactive adaptive multi-pane stage layout and
 ;;                      click-to-zoom window reconciliation
+;;   lispm-ui-scene-layout.el
+;;                      persistent spatial allocation, pod packing,
+;;                      orthogonal routing, and validated state I/O
+;;   lispm-ui-scene-sprites.el
+;;                      pixel portraits, room interiors, avatar caching,
+;;                      and SVG sprite primitives
+;;   lispm-ui-scene.el  immutable scene composition, SVG/text rendering, and
+;;                      pure coordinate hit-testing
+;;   lispm-ui-sheet.el  property-sheet headers, portrait chips, wrapping
+;;                      buttons, and tab strips
 ;;   lispm-ui-i18n.el   the language its words are shown in, and their
 ;;                      translations, i18n/, which LispM Kit's engine
 ;;                      reads
@@ -118,6 +128,10 @@
 (require 'lispm-ui-form)
 (require 'lispm-ui-spotlight)
 (require 'lispm-ui-stage)
+(require 'lispm-ui-scene-layout)
+(require 'lispm-ui-scene-sprites)
+(require 'lispm-ui-scene)
+(require 'lispm-ui-sheet)
 
 (provide 'lispm-ui)
 ;;; lispm-ui.el ends here

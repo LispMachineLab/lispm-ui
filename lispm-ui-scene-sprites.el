@@ -336,50 +336,9 @@ SIZE defaults to 18 pixels."
 ;;;; Room interiors, fixtures, and wall decor
 
 (defun lispm-ui-scene--interior-patterns (svg room style)
-  "Define floor and wallpaper patterns on SVG for ROOM using STYLE."
-  (let* ((id (format "%s" (plist-get room :id)))
-         (floor-id (concat "office-floor-" id))
-         (wall-id (concat "office-wall-" id))
-         (defs (list 'defs nil))
-         (floor (list 'pattern `((id . ,floor-id)
-                                 (patternUnits . "userSpaceOnUse")
-                                 (width . 80) (height . 64))))
-         (wall (list 'pattern `((id . ,wall-id)
-                                (patternUnits . "userSpaceOnUse")
-                                (width . 16) (height . 16))))
-         (base (plist-get style :floor))
-         (grain (plist-get style :grain))
-         (trim (plist-get style :trim)))
-    (svg-rectangle floor 0 0 80 64 :fill base)
-    (pcase (plist-get style :pattern)
-      ('planks (lispm-ui-scene-svg-rects
-                floor `((0 0 80 1 ,grain) (0 16 80 1 ,grain) (22 0 1 16 ,grain))))
-      ('tiles (lispm-ui-scene-svg-rects
-               floor `((0 0 16 1 ,grain) (0 0 1 16 ,grain)
-                       (2 2 12 12 "#ffffff" 0.06))))
-      ('parquet (lispm-ui-scene-svg-rects
-                 floor `((0 0 16 1 ,grain) (8 0 1 16 ,grain) (16 8 16 1 ,grain))))
-      ('tatami (lispm-ui-scene-svg-rects
-                floor `((0 0 80 1 ,grain) (0 0 3 64 "#5f6e52")
-                        (40 0 3 64 "#5f6e52"))))
-      (_ (lispm-ui-scene-svg-rects
-          floor `((2 2 2 2 ,grain 0.55) (10 10 2 2 ,grain 0.55)))))
-    (svg-rectangle wall 0 0 16 16 :fill (plist-get style :wall))
-    (pcase (plist-get style :id)
-      ((or 'oak 'library)
-       (lispm-ui-scene-svg-rects
-        wall `((0 0 1 16 ,trim 0.14) (3 0 1 16 "#ffffff" 0.28))))
-      ((or 'mint 'cream)
-       (lispm-ui-scene-svg-rects
-        wall `((7 5 2 2 ,trim 0.13) (5 7 6 2 ,trim 0.13))))
-      ((or 'rose 'apricot)
-       (lispm-ui-scene-svg-rects
-        wall `((0 0 1 16 ,trim 0.09) (7 7 2 2 ,trim 0.16))))
-      (_ (svg-rectangle wall 0 0 16 1 :fill trim :opacity 0.08)))
-    (dom-append-child defs floor)
-    (dom-append-child defs wall)
-    (dom-append-child svg defs)
-    (cons base (plist-get style :wall))))
+  "Return `(FLOOR . WALL)' fill colors from STYLE for ROOM on SVG."
+  (ignore svg room)
+  (cons (plist-get style :floor) (plist-get style :wall)))
 
 (defun lispm-ui-scene--draw-bookshelf (group x y w h trim)
   "Draw a bookcase fixture on GROUP at X, Y with dimensions W, H and TRIM."

@@ -44,7 +44,6 @@
 
 ;;;; Structured conditions
 
-(define-error 'lispm-ui-error "LispM UI error")
 (define-error 'lispm-ui-frp-error "LispM UI reactive graph error" 'lispm-ui-error)
 
 ;;;; Signals (continuous behaviors)
@@ -64,7 +63,9 @@
   (level 0 :type integer)
   (stale nil :type boolean)
   (dependents nil :type list)
-  (effects nil :type list))
+  (effects nil :type list)
+  (cleanups nil :type list)
+  (disposed nil :type boolean))
 
 (cl-defstruct (lispm-ui-effect
                (:constructor lispm-ui-effect--create)
@@ -74,6 +75,64 @@
   (sources nil :type list)
   (callback #'ignore :type function)
   (active t :type boolean))
+
+(cl-defstruct (lispm-ui-scope
+               (:constructor lispm-ui-scope--create)
+               (:copier nil)
+               (:predicate lispm-ui-scope-p))
+  "An ownership scope that disposes registered reactive resources together."
+  (cleanups nil :type list)
+  (disposed nil :type boolean))
+
+(defvar lispm-ui-frp--current-scope nil
+  "Active `lispm-ui-scope' capturing newly created reactive resources.")
+
+(defvar lispm-ui-frp-max-flush-steps 1000
+  "Maximum propagation rounds allowed in one `lispm-ui-frp--flush' cycle.")
+
+(defun lispm-ui-scope-create ()
+  "Return a fresh ownership scope for reactive signals, effects, and streams."
+  (lispm-ui-scope--create))
+
+(defun lispm-ui-scope-add (scope cleanup)
+  "Register zero-argument CLEANUP thunk on SCOPE and return CLEANUP.
+When SCOPE is already disposed, run CLEANUP immediately."
+  (when (functionp cleanup)
+    (cond
+     ((null scope) nil)
+     ((not (lispm-ui-scope-p scope))
+      (signal 'lispm-ui-frp-error (list "Not a scope" scope)))
+     ((lispm-ui-scope-disposed scope)
+      (funcall cleanup))
+     (t
+      (push cleanup (lispm-ui-scope-cleanups scope)))))
+  cleanup)
+
+(defun lispm-ui-scope-dispose (scope)
+  "Dispose SCOPE, running all registered cleanups in reverse creation order."
+  (when (and (lispm-ui-scope-p scope)
+             (not (lispm-ui-scope-disposed scope)))
+    (setf (lispm-ui-scope-disposed scope) t)
+    (let ((cleanups (lispm-ui-scope-cleanups scope)))
+      (setf (lispm-ui-scope-cleanups scope) nil)
+      (dolist (cleanup cleanups)
+        (when (functionp cleanup)
+          (funcall cleanup)))))
+  nil)
+
+(defmacro lispm-ui-with-scope (scope &rest body)
+  "Run BODY with SCOPE capturing newly created signals, effects, and streams."
+  (declare (indent 1) (debug t))
+  `(let ((lispm-ui-frp--current-scope ,scope))
+     ,@body))
+
+(defun lispm-ui-scope-attach-buffer (scope &optional buffer)
+  "Dispose SCOPE automatically when BUFFER (default current) is killed."
+  (with-current-buffer (or buffer (current-buffer))
+    (add-hook 'kill-buffer-hook
+              (lambda () (lispm-ui-scope-dispose scope))
+              nil t))
+  scope)
 
 (defvar lispm-ui-frp--batch-depth 0
   "Current nesting depth of `lispm-ui-frp-batch' transactions.")
@@ -122,7 +181,26 @@ their current values whenever any source changes.  TEST defaults to `equal'."
                    :level level)))
     (dolist (source sources)
       (cl-pushnew derived (lispm-ui-signal-dependents source) :test #'eq))
+    (when lispm-ui-frp--current-scope
+      (lispm-ui-scope-add lispm-ui-frp--current-scope
+                          (lambda () (lispm-ui-signal-dispose derived))))
     derived))
+
+(defun lispm-ui-signal-dispose (signal)
+  "Detach SIGNAL from upstream sources and run its registered cleanups."
+  (when (lispm-ui-signal-p signal)
+    (setf (lispm-ui-signal-disposed signal) t)
+    (dolist (source (lispm-ui-signal-sources signal))
+      (setf (lispm-ui-signal-dependents source)
+            (delq signal (lispm-ui-signal-dependents source))))
+    (setf (lispm-ui-signal-sources signal) nil
+          (lispm-ui-signal-dependents signal) nil)
+    (let ((cleanups (lispm-ui-signal-cleanups signal)))
+      (setf (lispm-ui-signal-cleanups signal) nil)
+      (dolist (cleanup cleanups)
+        (when (functionp cleanup)
+          (funcall cleanup)))))
+  nil)
 
 (defun lispm-ui-signal-map (fn signal &optional test)
   "Return a derived signal applying unary FN to SIGNAL's value."
@@ -243,11 +321,12 @@ Return SIGNAL."
   (lispm-ui-signal-value signal))
 
 (defun lispm-ui-frp--mark-dependents (signal)
-  "Mark all transitive derived dependents of SIGNAL as stale."
+  "Mark all transitive derived dependents of SIGNAL as stale and pending."
   (dolist (dep (lispm-ui-signal-dependents signal))
-    (unless (lispm-ui-signal-stale dep)
+    (unless (or (lispm-ui-signal-disposed dep)
+                (memq dep lispm-ui-frp--pending-signals))
       (setf (lispm-ui-signal-stale dep) t)
-      (cl-pushnew dep lispm-ui-frp--pending-signals :test #'eq)
+      (push dep lispm-ui-frp--pending-signals)
       (lispm-ui-frp--mark-dependents dep))))
 
 (defun lispm-ui-frp--enqueue-effects (signal)
@@ -256,51 +335,76 @@ Return SIGNAL."
     (when (lispm-ui-effect-active effect)
       (cl-pushnew effect lispm-ui-frp--pending-effects :test #'eq))))
 
+(defun lispm-ui-frp--pop-lowest-signal ()
+  "Remove and return the pending signal with minimum topological level."
+  (let ((best (car lispm-ui-frp--pending-signals)))
+    (dolist (sig (cdr lispm-ui-frp--pending-signals))
+      (when (< (lispm-ui-signal-level sig) (lispm-ui-signal-level best))
+        (setq best sig)))
+    (setq lispm-ui-frp--pending-signals
+          (delq best lispm-ui-frp--pending-signals))
+    best))
+
 (defun lispm-ui-frp--flush ()
-  "Propagate pending signals in topological order and run triggered effects.
-Effects run one at a time while batching stays active; if an effect
-mutates a signal, dirty derived signals are topologically recomputed
-before the next pending effect runs."
-  (let ((lispm-ui-frp--batch-depth (max 1 lispm-ui-frp--batch-depth)))
-    (while (or lispm-ui-frp--pending-signals lispm-ui-frp--pending-effects)
+  "Propagate pending signals in topological order and run triggered effects."
+  (let ((lispm-ui-frp--batch-depth (max 1 lispm-ui-frp--batch-depth))
+        (steps 0)
+        (fifo nil))
+    (while (or lispm-ui-frp--pending-signals lispm-ui-frp--pending-effects fifo)
+      (cl-incf steps)
+      (when (> steps lispm-ui-frp-max-flush-steps)
+        (setq lispm-ui-frp--pending-signals nil
+              lispm-ui-frp--pending-effects nil
+              fifo nil)
+        (signal 'lispm-ui-frp-error
+                (list "Reactive propagation exceeded step limit" steps)))
       (while lispm-ui-frp--pending-signals
-        (let* ((queue (sort lispm-ui-frp--pending-signals
-                            (lambda (a b)
-                              (< (lispm-ui-signal-level a)
-                                 (lispm-ui-signal-level b)))))
-               (next (car queue)))
-          (setq lispm-ui-frp--pending-signals (cdr queue))
-          (lispm-ui-signal--recompute next)))
-      (when (and (null lispm-ui-frp--pending-signals)
-                 lispm-ui-frp--pending-effects)
-        (let* ((ordered (nreverse lispm-ui-frp--pending-effects))
-               (effect (car ordered)))
-          (setq lispm-ui-frp--pending-effects (nreverse (cdr ordered)))
+        (lispm-ui-signal--recompute (lispm-ui-frp--pop-lowest-signal)))
+      (when lispm-ui-frp--pending-effects
+        (let ((added (nreverse lispm-ui-frp--pending-effects)))
+          (setq lispm-ui-frp--pending-effects nil)
+          (dolist (eff added)
+            (unless (memq eff fifo)
+              (setq fifo (nconc fifo (list eff)))))))
+      (when fifo
+        (let ((effect (pop fifo)))
           (when (lispm-ui-effect-active effect)
             (apply (lispm-ui-effect-callback effect)
                    (mapcar #'lispm-ui-signal-get
                            (lispm-ui-effect-sources effect)))))))))
 
+(defun lispm-ui-frp-begin-batch ()
+  "Begin a reactive batch transaction; pair with `lispm-ui-frp-end-batch'."
+  (setq lispm-ui-frp--batch-depth (1+ lispm-ui-frp--batch-depth)))
+
+(defun lispm-ui-frp-end-batch (&optional commit)
+  "End a reactive batch transaction started by `lispm-ui-frp-begin-batch'.
+When COMMIT is non-nil on the outermost transaction, flush queued updates;
+otherwise drop pending queues cleanly without double-flushing."
+  (let ((depth (max 0 (1- lispm-ui-frp--batch-depth))))
+    (setq lispm-ui-frp--batch-depth depth)
+    (when (zerop depth)
+      (unwind-protect
+          (when commit
+            (lispm-ui-frp--flush))
+        (setq lispm-ui-frp--pending-signals nil
+              lispm-ui-frp--pending-effects nil)))))
+
+(defalias 'lispm-ui-frp--begin-batch #'lispm-ui-frp-begin-batch)
+(defalias 'lispm-ui-frp--end-batch #'lispm-ui-frp-end-batch)
+
 (defmacro lispm-ui-frp-batch (&rest body)
   "Execute BODY in a glitch-free reactive transaction.
 Signal updates inside BODY are batched; derived signals and effects
-propagate once in topological order when the outermost batch finishes."
+propagate once in topological order when the outermost batch commits."
   (declare (indent 0) (debug t))
-  (let ((outer (make-symbol "outer")))
-    `(let ((,outer (= lispm-ui-frp--batch-depth 0)))
-       (setq lispm-ui-frp--batch-depth (1+ lispm-ui-frp--batch-depth))
+  (let ((committed (make-symbol "committed")))
+    `(let ((,committed nil))
+       (lispm-ui-frp-begin-batch)
        (unwind-protect
            (prog1 (progn ,@body)
-             (when ,outer
-               (setq lispm-ui-frp--batch-depth 0)
-               (lispm-ui-frp--flush)))
-         (when ,outer
-           (setq lispm-ui-frp--batch-depth 0)
-           (when (or lispm-ui-frp--pending-signals lispm-ui-frp--pending-effects)
-             (unwind-protect
-                 (lispm-ui-frp--flush)
-               (setq lispm-ui-frp--pending-signals nil
-                     lispm-ui-frp--pending-effects nil))))))))
+             (setq ,committed t))
+         (lispm-ui-frp-end-batch ,committed)))))
 
 (defun lispm-ui-signal-set (signal value)
   "Set source SIGNAL to VALUE, propagating changes if different."
@@ -340,6 +444,9 @@ Return the `lispm-ui-effect' handle (pass to `lispm-ui-effect-dispose')."
                 (append (lispm-ui-signal-effects source) (list effect)))))
       (when run-immediately
         (apply callback (mapcar #'lispm-ui-signal-get list)))
+      (when lispm-ui-frp--current-scope
+        (lispm-ui-scope-add lispm-ui-frp--current-scope
+                            (lambda () (lispm-ui-effect-dispose effect))))
       effect)))
 
 (defun lispm-ui-effect-dispose (effect)
@@ -358,11 +465,23 @@ Return the `lispm-ui-effect' handle (pass to `lispm-ui-effect-dispose')."
                (:copier nil)
                (:predicate lispm-ui-stream-p))
   "A discrete stream of events pushing occurrences to subscribers."
-  (listeners nil :type list))
+  (listeners nil :type list)
+  (cleanups nil :type list))
 
 (defun lispm-ui-stream ()
   "Return a fresh discrete event stream."
   (lispm-ui-stream--create))
+
+(defun lispm-ui-stream-dispose (stream)
+  "Detach STREAM from upstream subscriptions and clear its listeners."
+  (when (lispm-ui-stream-p stream)
+    (setf (lispm-ui-stream-listeners stream) nil)
+    (let ((cleanups (lispm-ui-stream-cleanups stream)))
+      (setf (lispm-ui-stream-cleanups stream) nil)
+      (dolist (cleanup cleanups)
+        (when (functionp cleanup)
+          (funcall cleanup)))))
+  nil)
 
 (defun lispm-ui-stream-subscribe (stream listener)
   "Subscribe LISTENER to STREAM; return an unsubscribe thunk."
@@ -370,9 +489,12 @@ Return the `lispm-ui-effect' handle (pass to `lispm-ui-effect-dispose')."
     (signal 'lispm-ui-frp-error (list "Not a stream" stream)))
   (setf (lispm-ui-stream-listeners stream)
         (append (lispm-ui-stream-listeners stream) (list listener)))
-  (lambda ()
-    (setf (lispm-ui-stream-listeners stream)
-          (delq listener (lispm-ui-stream-listeners stream)))))
+  (let ((unsub (lambda ()
+                 (setf (lispm-ui-stream-listeners stream)
+                       (delq listener (lispm-ui-stream-listeners stream))))))
+    (when lispm-ui-frp--current-scope
+      (lispm-ui-scope-add lispm-ui-frp--current-scope unsub))
+    unsub))
 
 (defun lispm-ui-stream-emit (stream event)
   "Emit discrete EVENT on STREAM within a reactive batch."
@@ -385,35 +507,55 @@ Return the `lispm-ui-effect' handle (pass to `lispm-ui-effect-dispose')."
 
 (defun lispm-ui-stream-map (fn stream)
   "Return a stream emitting `(funcall FN event)' for each event on STREAM."
-  (let ((out (lispm-ui-stream)))
-    (lispm-ui-stream-subscribe
-     stream (lambda (event) (lispm-ui-stream-emit out (funcall fn event))))
+  (let ((scope lispm-ui-frp--current-scope)
+        (lispm-ui-frp--current-scope nil)
+        (out (lispm-ui-stream)))
+    (push (lispm-ui-stream-subscribe
+           stream (lambda (event) (lispm-ui-stream-emit out (funcall fn event))))
+          (lispm-ui-stream-cleanups out))
+    (when scope
+      (lispm-ui-scope-add scope (lambda () (lispm-ui-stream-dispose out))))
     out))
 
 (defun lispm-ui-stream-filter (pred stream)
   "Return a stream emitting only events of STREAM satisfying PRED."
-  (let ((out (lispm-ui-stream)))
-    (lispm-ui-stream-subscribe
-     stream (lambda (event)
-              (when (funcall pred event)
-                (lispm-ui-stream-emit out event))))
+  (let ((scope lispm-ui-frp--current-scope)
+        (lispm-ui-frp--current-scope nil)
+        (out (lispm-ui-stream)))
+    (push (lispm-ui-stream-subscribe
+           stream (lambda (event)
+                    (when (funcall pred event)
+                      (lispm-ui-stream-emit out event))))
+          (lispm-ui-stream-cleanups out))
+    (when scope
+      (lispm-ui-scope-add scope (lambda () (lispm-ui-stream-dispose out))))
     out))
 
 (defun lispm-ui-stream-merge (&rest streams)
   "Return a stream emitting events from any of STREAMS."
-  (let ((out (lispm-ui-stream)))
+  (let ((scope lispm-ui-frp--current-scope)
+        (lispm-ui-frp--current-scope nil)
+        (out (lispm-ui-stream)))
     (dolist (stream streams)
-      (lispm-ui-stream-subscribe
-       stream (lambda (event) (lispm-ui-stream-emit out event))))
+      (push (lispm-ui-stream-subscribe
+             stream (lambda (event) (lispm-ui-stream-emit out event)))
+            (lispm-ui-stream-cleanups out)))
+    (when scope
+      (lispm-ui-scope-add scope (lambda () (lispm-ui-stream-dispose out))))
     out))
 
 (defun lispm-ui-stream-fold (step initial stream &optional test)
   "Fold STREAM with STEP from INITIAL into a continuous `lispm-ui-signal'.
 STEP is called as `(funcall STEP state event)'."
-  (let ((sig (lispm-ui-signal initial test)))
-    (lispm-ui-stream-subscribe
-     stream (lambda (event)
-              (lispm-ui-signal-set sig (funcall step (lispm-ui-signal-get sig) event))))
+  (let ((scope lispm-ui-frp--current-scope)
+        (lispm-ui-frp--current-scope nil)
+        (sig (lispm-ui-signal initial test)))
+    (push (lispm-ui-stream-subscribe
+           stream (lambda (event)
+                    (lispm-ui-signal-set sig (funcall step (lispm-ui-signal-get sig) event))))
+          (lispm-ui-signal-cleanups sig))
+    (when scope
+      (lispm-ui-scope-add scope (lambda () (lispm-ui-signal-dispose sig))))
     sig))
 
 (defun lispm-ui-stream-buffer-within (window-seconds combine empty stream &optional clock)
@@ -422,17 +564,22 @@ COMBINE folds `(funcall COMBINE acc event)' starting from EMPTY; when an
 event arrives more than WINDOW-SECONDS after the previous one, the
 accumulator resets to EMPTY first.  CLOCK defaults to `float-time'.
 Return a `lispm-ui-signal' of the current accumulated value."
-  (let ((clock (or clock #'float-time))
+  (let ((scope lispm-ui-frp--current-scope)
+        (lispm-ui-frp--current-scope nil)
+        (clock (or clock #'float-time))
         (last-time 0.0)
         (sig (lispm-ui-signal empty)))
-    (lispm-ui-stream-subscribe
-     stream (lambda (event)
-              (let* ((now (funcall clock))
-                     (base (if (< (- now last-time) window-seconds)
-                               (lispm-ui-signal-get sig)
-                             empty)))
-                (setq last-time now)
-                (lispm-ui-signal-set sig (funcall combine base event)))))
+    (push (lispm-ui-stream-subscribe
+           stream (lambda (event)
+                    (let* ((now (funcall clock))
+                           (base (if (< (- now last-time) window-seconds)
+                                     (lispm-ui-signal-get sig)
+                                   empty)))
+                      (setq last-time now)
+                      (lispm-ui-signal-set sig (funcall combine base event)))))
+          (lispm-ui-signal-cleanups sig))
+    (when scope
+      (lispm-ui-scope-add scope (lambda () (lispm-ui-signal-dispose sig))))
     sig))
 
 (defun lispm-ui-frp-type-select-step (typed-pair char &optional window-seconds now)

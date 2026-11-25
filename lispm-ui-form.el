@@ -186,6 +186,9 @@ markers, GROUP non-nil when the field is in a group box.")
   "Non-nil when the form in this buffer is to be drawn again, a value of
 it having changed while it could not be.")
 
+(defvar-local lispm-ui-form--stale-status nil
+  "List of status keys queued for in-place redraw when `:on-change' returns.")
+
 (defvar lispm-ui-form--changing nil
   "The buffer of the form whose field's :on-change is being called, or
 nil: the form is drawn again once it returns, not while it runs.")
@@ -217,6 +220,8 @@ default the current buffer: an alist (KEY . WIDGET)."
   :parent widget-keymap
   "C-c C-c" #'lispm-ui-form-submit
   "C-c C-k" #'lispm-ui-form-cancel
+  "C-x h" #'lispm-ui-form-select-all
+  "SPC" #'lispm-ui-form-activate-or-space
   "M-a" #'lispm-ui-form-select-field
   "s-a" #'lispm-ui-form-select-field
   "<down-mouse-1>" #'lispm-ui-form--mouse
@@ -251,6 +256,7 @@ TAB and S-TAB go from field to field, \\[lispm-ui-form-submit] submits it,
               (let ((base (default-value 'yank-excluded-properties)))
                 (append '(face display lispm-ui-form-padding)
                         (and (listp base) base))))
+  (setq-local filter-buffer-substring-function #'lispm-ui-form--filter-substring)
   (add-hook 'pre-command-hook #'lispm-ui-form--replace-marked nil t)
   (add-hook 'post-command-hook #'lispm-ui-form--keep-point nil t))
 
@@ -386,10 +392,26 @@ that returns."
         (setq key (pop more)
               value (pop more))))
     (cond ((eq lispm-ui-form--changing (current-buffer))
-           (setq lispm-ui-form--stale t))
+           (if (and (not lispm-ui-form--stale)
+                    (seq-every-p (lambda (k) (eq (lispm-ui-form--type k) 'status)) keys))
+               (dolist (k (nreverse keys))
+                 (cl-pushnew k lispm-ui-form--stale-status :test #'eq))
+             (setq lispm-ui-form--stale t
+                   lispm-ui-form--stale-status nil)))
           ((and (seq-every-p (lambda (k) (eq (lispm-ui-form--type k) 'status)) keys)
                 (seq-every-p #'lispm-ui-form--draw-in-place (nreverse keys))))
           (t (lispm-ui-form--draw)))))
+
+(defun lispm-ui-form--flush-deferred (redraw)
+  "Apply any deferred redraw or in-place status update in the current buffer."
+  (cond
+   ((or redraw lispm-ui-form--stale)
+    (lispm-ui-form--draw))
+   (lispm-ui-form--stale-status
+    (let ((keys (nreverse lispm-ui-form--stale-status)))
+      (setq lispm-ui-form--stale-status nil)
+      (unless (seq-every-p #'lispm-ui-form--draw-in-place keys)
+        (lispm-ui-form--draw))))))
 
 (defun lispm-ui-form--changed (key value &optional redraw)
   "Make VALUE the value of the field KEY, as it was changed, and call the
@@ -407,13 +429,14 @@ not while the text of a field is being changed."
       ;; Shown as it now is, whatever :on-change refused.
       (when (buffer-live-p buffer)
         (with-current-buffer buffer
-          (cond (redraw (lispm-ui-form--draw))
-                (lispm-ui-form--stale
-                 (run-at-time 0 nil (lambda ()
-                                      (when (buffer-live-p buffer)
-                                        (with-current-buffer buffer
-                                          (when lispm-ui-form--stale
-                                            (lispm-ui-form--draw)))))))))))))
+          (cond
+           (redraw (lispm-ui-form--draw))
+           ((or lispm-ui-form--stale lispm-ui-form--stale-status)
+            (run-at-time 0 nil (lambda ()
+                                 (when (buffer-live-p buffer)
+                                   (with-current-buffer buffer
+                                     (when (or lispm-ui-form--stale lispm-ui-form--stale-status)
+                                       (lispm-ui-form--flush-deferred nil)))))))))))))
 
 (defun lispm-ui-form--choices (field)
   "The choices of FIELD, (VALUE . LABEL) each."
@@ -617,6 +640,7 @@ as it is drawn now."
   "Draw the form in this buffer, point staying in the field it was in."
   (let* ((place (lispm-ui-form--place))
          (inhibit-read-only t)
+         (buffer-undo-list t)
          (group nil))
     ;; The fields go first: erasing them would change them otherwise.
     (setq widget-field-list nil
@@ -624,7 +648,8 @@ as it is drawn now."
           widget-field-last nil
           lispm-ui-form--widgets nil
           lispm-ui-form--field-at-point nil
-          lispm-ui-form--stale nil)
+          lispm-ui-form--stale nil
+          lispm-ui-form--stale-status nil)
     (pcase-dolist (`(,_ ,start ,end ,_) lispm-ui-form--places)
       (set-marker start nil)
       (set-marker end nil))
@@ -900,11 +925,13 @@ form are told, as when it is drawn."
   (interactive)
   (unless (derived-mode-p 'lispm-ui-form-mode)
     (user-error "%s" (lispm-ui-tr "Not a form")))
-  (when-let* ((field (seq-find #'lispm-ui-form--problem
-                               (seq-filter #'lispm-ui-form--shown-p lispm-ui-form--fields))))
-    (when-let* ((widget (alist-get (car field) lispm-ui-form--widgets)))
+  (when-let* ((failure (seq-some (lambda (field)
+                                   (when-let* ((msg (lispm-ui-form--problem field)))
+                                     (cons field msg)))
+                                 (seq-filter #'lispm-ui-form--shown-p lispm-ui-form--fields))))
+    (when-let* ((widget (alist-get (caar failure) lispm-ui-form--widgets)))
       (goto-char (or (widget-field-start widget) (widget-get widget :from))))
-    (user-error "%s" (lispm-ui-form--problem field)))
+    (user-error "%s" (cdr failure)))
   (let ((buffer (current-buffer))
         (lispm-ui-in-gui-action t))
     (when-let* ((on-submit (plist-get lispm-ui-form--props :on-submit)))

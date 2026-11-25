@@ -103,7 +103,7 @@ line drawn in text, WIDTH cells long, TITLE breaking it near its left end."
                     (propertize (concat (make-string (max 0 (- width 3 (string-width title))) ?─) "┐")
                                 'face rule)))))
     (propertize " " 'display
-                (lispm-ui-image
+                (lispm-ui-look-image
                  (list 'group-edge width title bottom)
                  (lambda () (lispm-ui-draw-group-edge lispm-ui-current-palette
                                                       width title bottom))))))
@@ -123,7 +123,7 @@ terminal it is a line drawn in text."
   (if (lispm-ui-tty-p)
       (propertize "│" 'face `(:foreground ,(lispm-ui-color :muted)))
     (propertize " " 'display
-                (lispm-ui-image
+                (lispm-ui-look-image
                  (list 'group-side height)
                  (lambda () (lispm-ui-draw-group-side lispm-ui-current-palette
                                                       height))))))
@@ -399,7 +399,7 @@ text terminal it is LABEL and an arrow, between brackets."
     (let ((width (lispm-ui-popup-button-width label))
           (pad (or pad 2)))
       (propertize " " 'display
-                  (lispm-ui-image
+                  (lispm-ui-look-image
                    (list 'popup label width state focused pad)
                    (lambda ()
                      (lispm-ui-draw-popup-button lispm-ui-current-palette
@@ -561,7 +561,7 @@ HEIGHT defaults to 20 pixels.  See `lispm-ui-draw-bevel-button'."
     (if (lispm-ui-tty-p)
         (lispm-ui-text-button label state)
       (propertize " " 'display
-                  (lispm-ui-image
+                  (lispm-ui-look-image
                    (list 'bevel (lispm-ui-content-key label) state height face width)
                    (lambda ()
                      (lispm-ui-draw-bevel-button lispm-ui-current-palette width height
@@ -594,7 +594,7 @@ button keeps its place as the keyboard comes and goes."
                                   (lispm-ui-text-button (concat " " label " ") state default)
                                   focused))
       (propertize " " 'display
-                  (lispm-ui-image
+                  (lispm-ui-look-image
                    (list 'push label width state default focused pad)
                    (lambda ()
                      (lispm-ui-draw-push-button lispm-ui-current-palette label width
@@ -608,7 +608,7 @@ place as the keyboard comes and goes.  See `lispm-ui-draw-radio'."
   (propertize " " 'display
               (if (lispm-ui-tty-p)
                   (lispm-ui-text-control (if on "(•)" "( )") focused state)
-                (lispm-ui-image
+                (lispm-ui-look-image
                  (list 'radio on state focused)
                  (lambda () (lispm-ui-draw-radio lispm-ui-current-palette on
                                                  :state state :focused focused :pad 2))))))
@@ -645,7 +645,7 @@ See `lispm-ui-draw-list-check-box'."
   (propertize " " 'display
               (if (lispm-ui-tty-p)
                   (lispm-ui-text-control (pcase state ('on "[✓]") ('mixed "[-]") (_ "[ ]")))
-                (lispm-ui-image
+                (lispm-ui-look-image
                  (list 'list-check-box state)
                  (lambda () (lispm-ui-draw-list-check-box lispm-ui-current-palette
                                                           state))))))
@@ -657,7 +657,7 @@ FOCUSED rings it, and PAD leaves room about it; see
   (propertize " " 'display
               (if (lispm-ui-tty-p)
                   (lispm-ui-text-control (if on "[✓]" "[ ]") focused state)
-                (lispm-ui-image
+                (lispm-ui-look-image
                  (list 'check-box on state focused pad)
                  (lambda () (lispm-ui-draw-check-box lispm-ui-current-palette on
                                                      :state state :focused focused
@@ -698,17 +698,21 @@ images elsewhere, see `lispm-ui-show-focus'."
 
 (defun lispm-ui--swap-image (position image)
   "Show IMAGE for the control at POSITION of the current buffer."
-  (with-silent-modifications
-    (let ((inhibit-read-only t))
-      (put-text-property position (1+ position) 'display image))))
+  (when (and (integerp position) (<= (point-min) position) (< position (point-max)))
+    (with-silent-modifications
+      (let ((inhibit-read-only t))
+        (put-text-property position (1+ position) 'display image)))))
 
 (defun lispm-ui-show-focus ()
   "Draw the control at point focused, and the one focused before plain.
 Controls carry their images as the text properties `lispm-ui-plain' and
 `lispm-ui-focused'.  Buffers holding controls run this from
 `post-command-hook', and after drawing their controls again."
-  (let ((here (and (get-text-property (point) 'lispm-ui-focused) (point)))
-        (before lispm-ui-focus))
+  (let* ((btn (and (not (get-text-property (point) 'lispm-ui-focused)) (button-at (point))))
+         (start (and btn (button-start btn)))
+         (here (cond ((get-text-property (point) 'lispm-ui-focused) (point))
+                     ((and start (get-text-property start 'lispm-ui-focused)) start)))
+         (before lispm-ui-focus))
     (unless (eql here before)
       (when (and before (< before (point-max))
                  (get-text-property before 'lispm-ui-plain))
@@ -789,7 +793,8 @@ control, COMMAND is called with no arguments in POSITION's window."
 From the mouse, it is let go when the button rises, and pressed only if
 it rises over the push button, as on Mac OS 9; from the keyboard, it
 blinks.  Return non-nil when the button was pressed."
-  (let ((pressed (get-text-property position 'lispm-ui-pressed))
+  (let ((buffer (current-buffer))
+        (pressed (get-text-property position 'lispm-ui-pressed))
         (shown (get-text-property position 'display)))
     (if (not (mouse-event-p last-input-event))
         (unwind-protect
@@ -798,7 +803,9 @@ blinks.  Return non-nil when the button was pressed."
               (redisplay t)
               (sit-for (alist-get 'button lispm-ui-modal-flashes))
               t)
-          (lispm-ui--swap-image position shown))
+          (when (buffer-live-p buffer)
+            (with-current-buffer buffer
+              (lispm-ui--swap-image position shown))))
       (let ((window (posn-window (event-start last-input-event))))
         (lispm-ui-modal-hold
          (lambda (event)
@@ -806,7 +813,9 @@ blinks.  Return non-nil when the button was pressed."
              (and (eq (posn-window end) window)
                   (eql (posn-point end) position))))
          (lambda (in)
-           (lispm-ui--swap-image position (if in pressed shown))
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (lispm-ui--swap-image position (if in pressed shown))))
            (redisplay t)))))))
 
 (defun lispm-ui-push (&optional position)
@@ -823,9 +832,17 @@ Space do, or as a press of the mouse does; other buttons are pushed as
 (defun lispm-ui--mouse-push (event)
   "Press the push button EVENT went down on, see `lispm-ui-push'."
   (interactive "e")
-  (let ((position (event-start event)))
-    (with-selected-window (posn-window position)
-      (lispm-ui-push (posn-point position)))))
+  (let* ((position (event-start event))
+         (win (posn-window position))
+         (pt (posn-point position)))
+    (when (and (window-live-p win) (integerp pt))
+      (with-selected-window win
+        (lispm-ui-push pt)))))
+
+(defvar-keymap lispm-ui-control-button-map
+  :doc "Keymap of interactive buffer controls (radio buttons and check boxes)."
+  :parent button-map
+  "SPC" #'push-button)
 
 (defvar-keymap lispm-ui-push-button-map
   :doc "Keymap of a push button in a buffer."
@@ -835,6 +852,27 @@ Space do, or as a press of the mouse does; other buttons are pushed as
   "<down-mouse-1>" #'lispm-ui--mouse-push
   "<mouse-1>" #'ignore
   "<drag-mouse-1>" #'ignore)
+
+(defun lispm-ui-image-well (image &optional width height)
+  "Return an inset image well holding IMAGE (file path or image spec).
+WIDTH and HEIGHT default to 64 pixels."
+  (let ((w (or width 64))
+        (h (or height width 64)))
+    (lispm-ui-look-image
+     (list 'image-well image w h)
+     (lambda ()
+       (let* ((palette lispm-ui-current-palette)
+              (grey (lambda (level) (lispm-ui-grey palette level)))
+              (svg (svg-create (+ w 4) (+ h 4))))
+         (lispm-ui-svg-fill svg 0 0 (+ w 4) (+ h 4) (funcall grey #xFF))
+         (lispm-ui-svg-fill svg 0 0 (+ w 3) (+ h 3) (funcall grey #x88))
+         (lispm-ui-svg-fill svg 1 1 (+ w 2) (+ h 2) (plist-get palette :outline))
+         (lispm-ui-svg-fill svg 2 2 w h (plist-get palette :content))
+         (when-let* ((spec (cond ((consp image) image)
+                                 ((and (stringp image) (file-readable-p image))
+                                  (create-image image)))))
+           (lispm-ui-svg-emacs-image svg spec 2 2 w h))
+         svg)))))
 
 (defun lispm-ui-image-of (control)
   "Return the image CONTROL, a string displaying one, shows."
@@ -848,50 +886,55 @@ its text, drawn in its image, is kept in its `lispm-ui-label' property.
 A DISABLED button is drawn dimmed and does nothing; Tab passes it by."
   (if disabled
       (insert (propertize " " 'display (lispm-ui-image-of
-                                        (lispm-ui-push-button label :state 'disabled))
+                                        (lispm-ui-push-button label :default default :state 'disabled))
                           'lispm-ui-label label 'face nil 'help-echo (or help label)))
     (lispm-ui--insert-push-button label action help default)))
 
-(defun lispm-ui--insert-control (images label action help &optional keymap)
+(defun lispm-ui--insert-control (images label action help &optional keymap disabled)
   "Insert a control showing IMAGES, as a button calling ACTION with no arguments.
 IMAGES is a function of FOCUSED and STATE returning the control's image,
 or its text on a text terminal.  LABEL follows it, if non-nil; HELP
-describes it.  KEYMAP, by default button.el's, is the control's."
-  (insert-text-button
-   (concat (propertize " " 'display (funcall images nil nil)
-                       'lispm-ui-plain (funcall images nil nil)
-                       'lispm-ui-focused (funcall images t nil)
-                       'lispm-ui-pressed (funcall images nil 'pressed))
-           (if label (concat " " label) ""))
-   'action (lambda (_)
-             (let ((lispm-ui-in-gui-action t))
-               (funcall action)))
-   'face 'default 'follow-link t 'help-echo help
-   'keymap (or keymap button-map)))
+describes it.  KEYMAP defaults to `lispm-ui-control-button-map'; when
+DISABLED is non-nil, render dimmed and non-interactive."
+  (if disabled
+      (insert (propertize (concat (propertize " " 'display (funcall images nil 'disabled))
+                                  (if label (concat " " label) ""))
+                          'face 'shadow 'help-echo help))
+    (insert-text-button
+     (concat (propertize " " 'display (funcall images nil nil)
+                         'lispm-ui-plain (funcall images nil nil)
+                         'lispm-ui-focused (funcall images t nil)
+                         'lispm-ui-pressed (funcall images nil 'pressed))
+             (if label (concat " " label) ""))
+     'action (lambda (_)
+               (let ((lispm-ui-in-gui-action t))
+                 (funcall action)))
+     'face 'default 'follow-link t 'help-echo help
+     'keymap (or keymap lispm-ui-control-button-map))))
 
-(cl-defun lispm-ui-insert-radio-button (label on action &key help)
+(cl-defun lispm-ui-insert-radio-button (label on action &key help disabled)
   "Insert a radio button named LABEL, ON or off, which calls ACTION with no
-arguments when pressed; HELP describes it.  Drawn focused while point is
-on it, see `lispm-ui-show-focus'."
+arguments when pressed; HELP describes it and DISABLED renders it dimmed.
+Drawn focused while point is on it, see `lispm-ui-show-focus'."
   (lispm-ui--insert-control
    (lambda (focused state)
      (lispm-ui-image-of (lispm-ui-radio on state focused)))
-   label action (or help label)))
+   label action (or help label) lispm-ui-control-button-map disabled))
 
-(cl-defun lispm-ui-insert-check-box (label on action &key help)
+(cl-defun lispm-ui-insert-check-box (label on action &key help disabled)
   "Insert a check box named LABEL, checked when ON, which calls ACTION with no
-arguments when pressed; HELP describes it.  Drawn focused while point is
-on it, see `lispm-ui-show-focus'."
+arguments when pressed; HELP describes it and DISABLED renders it dimmed.
+Drawn focused while point is on it, see `lispm-ui-show-focus'."
   (lispm-ui--insert-control
    (lambda (focused state)
      (lispm-ui-image-of (lispm-ui-check-box on state focused 2)))
-   label action (or help label)))
+   label action (or help label) lispm-ui-control-button-map disabled))
 
-(cl-defun lispm-ui-insert-popup-button (label choices action &key help current)
+(cl-defun lispm-ui-insert-popup-button (label choices action &key help current disabled)
   "Insert a pop-up menu showing LABEL, offering CHOICES, a list of (VALUE .
 TEXT); pressed, its menu opens at it, CURRENT's item checked, and the
-VALUE of the item chosen is given to ACTION.  HELP describes it.  Return,
-Space and the mouse open it, as they press a push button."
+VALUE of the item chosen is given to ACTION.  HELP describes it; DISABLED
+renders it dimmed.  Return, Space and the mouse open it like a push button."
   (lispm-ui--insert-control
    (lambda (focused state) (lispm-ui-image-of
                             (lispm-ui-popup-button label :state state :focused focused)))
@@ -904,7 +947,8 @@ Space and the mouse open it, as they press a push button."
                                           (or help label))))
        (funcall action (car choice))))
    (or help label)
-   lispm-ui-push-button-map))
+   lispm-ui-push-button-map
+   disabled))
 
 (defun lispm-ui--insert-push-button (label action help default)
   "Insert an enabled push button, see `lispm-ui-insert-push-button'."

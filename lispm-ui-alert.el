@@ -300,18 +300,19 @@ see `lispm-ui-alert--text-layout'."
 PRESSED and FOCUSED are as `lispm-ui-draw-alert' takes them.
 The buttons' places are kept in FRAME's `lispm-ui-popup-buttons'.
 On a text terminal the alert is text, see `lispm-ui-alert--text'."
-  (lispm-ui-popup-fill
-   frame (if (lispm-ui-tty-p frame)
-             (lispm-ui-alert--text icon message detail buttons pressed focused)
-           (propertize " " 'display
-                       (svg-image (lispm-ui-draw-alert lispm-ui-current-palette icon message
-                                                       detail buttons pressed focused)
-                                  :ascent 100 :scale 1))))
-  ;; The icon as an image where the terminal shows it.
-  (when (and (lispm-ui-tty-p frame) lispm-ui-tty-image-show-function)
-    (funcall lispm-ui-tty-image-show-function (frame-root-window frame)))
-  (set-frame-parameter frame 'lispm-ui-popup-buttons
-                       (plist-get (lispm-ui-alert--layout message detail buttons) :buttons)))
+  (when (frame-live-p frame)
+    (lispm-ui-popup-fill
+     frame (if (lispm-ui-tty-p frame)
+               (lispm-ui-alert--text icon message detail buttons pressed focused)
+             (propertize " " 'display
+                         (lispm-ui-svg-image
+                          (lispm-ui-draw-alert lispm-ui-current-palette icon message
+                                               detail buttons pressed focused)))))
+    ;; The icon as an image where the terminal shows it.
+    (when (and (lispm-ui-tty-p frame) lispm-ui-tty-image-show-function)
+      (funcall lispm-ui-tty-image-show-function (frame-root-window frame)))
+    (set-frame-parameter frame 'lispm-ui-popup-buttons
+                         (plist-get (lispm-ui-alert--layout message detail buttons) :buttons))))
 
 (defun lispm-ui-alert--button-at (event frame)
   "Return the value of the alert button under EVENT in FRAME, or nil."

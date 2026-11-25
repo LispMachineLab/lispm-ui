@@ -295,8 +295,8 @@ variation colour, light on dark, its edges lit and shaded in it too."
 
 (defun lispm-ui-menu--image (items width highlight)
   "Return the image of a menu of ITEMS, see `lispm-ui-draw-menu'."
-  (svg-image (lispm-ui-draw-menu lispm-ui-current-palette items width highlight)
-             :ascent 100 :scale 1))
+  (lispm-ui-svg-image
+   (lispm-ui-draw-menu lispm-ui-current-palette items width highlight)))
 
 (defun lispm-ui-menu--text (items width highlight)
   "Return a menu WIDTH cells wide listing ITEMS on a text terminal, as text.
@@ -389,10 +389,12 @@ no room on its right, as Mac OS 9 turned a submenu at the screen's edge."
 
 (defun lispm-ui-menu--draw-level (level)
   "Redraw menu LEVEL with its item under the mouse highlighted."
-  (lispm-ui-popup-fill (plist-get level :frame)
-                       (lispm-ui-menu--content (plist-get level :items)
-                                               (plist-get level :width)
-                                               (plist-get level :highlight))))
+  (let ((frame (plist-get level :frame)))
+    (when (frame-live-p frame)
+      (lispm-ui-popup-fill frame
+                           (lispm-ui-menu--content (plist-get level :items)
+                                                   (plist-get level :width)
+                                                   (plist-get level :highlight))))))
 
 (defun lispm-ui-menu--row-y (level index)
   "Return how far down menu LEVEL's frame its item INDEX starts, in pixels."
@@ -568,16 +570,16 @@ without entering it."
                          (redraw focus)
                          (setq focus parent))
                         (lispm-ui-menu-bar-step (throw 'lispm-ui-menu-bar-step -1)))))
-               ((and (characterp event) (>= event ?\s) (/= event ?\d))
-                ;; Typing an item's first letter goes to it, as in lists.
-                (when-let* ((index (lispm-ui-menu--item-starting
-                                    (plist-get focus :items) (plist-get focus :highlight) event)))
-                  (highlight focus index)))
-               ((eq role 'confirm)
+               ((or (eq role 'confirm) (eq role 'press))
                 (let ((chosen (item focus)))
                   (cond ((null chosen))
                         ((lispm-ui-menu--submenu chosen) (enter focus))
                         (t (throw 'done chosen)))))
+               ((and (characterp event) (> event ?\s) (/= event ?\d))
+                ;; Typing an item's first letter goes to it, as in lists.
+                (when-let* ((index (lispm-ui-menu--item-starting
+                                    (plist-get focus :items) (plist-get focus :highlight) event)))
+                  (highlight focus index)))
                ((mouse-movement-p event)
                 (setq event (lispm-ui-menu--coalesce-mouse-move event))
                 (when-let* ((level (under event)))
@@ -629,6 +631,18 @@ Submenus are followed down, their items' labels joined with \" › \"."
 ;;;; Choices
 
 (defalias 'lispm-ui-menu-submenu #'lispm-ui-menu--submenu)
+(defalias 'lispm-ui-menu-run #'lispm-ui-menu--run)
+(defalias 'lispm-ui-menu-rows #'lispm-ui-menu--rows)
+(defalias 'lispm-ui-menu-width #'lispm-ui-menu--width)
+(defalias 'lispm-ui-menu-label-x #'lispm-ui-menu--label-x)
+(defalias 'lispm-ui-menu-icon-room #'lispm-ui-menu--icon-room)
+(defalias 'lispm-ui-menu-key-margin #'lispm-ui-menu--key-margin)
+(defalias 'lispm-ui-menu-item-height #'lispm-ui-menu--item-height)
+(defalias 'lispm-ui-menu-item-face #'lispm-ui-menu--face)
+(defalias 'lispm-ui-menu-item-separator-p #'lispm-ui-menu--separator-p)
+(defalias 'lispm-ui-menu-item-enabled-p #'lispm-ui-menu--enabled-p)
+(defalias 'lispm-ui-menu-item-key #'lispm-ui-menu--key)
+(defalias 'lispm-ui-menu-item-label-width #'lispm-ui-menu--label-width)
 
 (defun lispm-ui-menu--parent-frame (frame)
   "Return the parent frame of FRAME when FRAME is a live frame, or nil."
@@ -680,7 +694,8 @@ When TARGET-PARENT is nil, walk up to FRAME's top-level ancestor frame."
          (xy (and posn (posn-x-y posn)))
          (edges (window-inside-pixel-edges win))
          (drop (if glyph-posn
-                   (max 0 (- lispm-ui-button-height (lispm-ui-menu--clipped-top vis)))
+                   (max 0 (- (if (lispm-ui-tty-p win) 1 lispm-ui-button-height)
+                             (lispm-ui-menu--clipped-top vis)))
                  0)))
     (when xy
       (list :x (+ (lispm-ui-menu--target-dx target) (car xy) (car edges))

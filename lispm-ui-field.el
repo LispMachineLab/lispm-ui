@@ -68,6 +68,9 @@
   "The minibuffer each frame read from before it had a field: (FRAME . VALUE),
 VALUE being the frame's `minibuffer' parameter then.")
 
+(defvar lispm-ui-field--echo-timer nil
+  "The most recently started timer hiding a field once a message is echoed.")
+
 (defun lispm-ui-field (frame)
   "Return the field FRAME reads and echoes in, or nil when it has none."
   (and (frame-live-p frame)
@@ -91,6 +94,20 @@ drawn inside another takes in place of the one it has not."
        (let ((mini (minibuffer-window frame)))
          (and mini (eq (window-frame mini) frame)))))
 
+(defun lispm-ui-field--on-delete-frame (frame)
+  "Dispose any child field owned by deleted FRAME and prune stale entries."
+  (when (assq frame lispm-ui-field--fields)
+    (lispm-ui-field-dispose frame))
+  (setq lispm-ui-field--fields
+        (seq-filter (lambda (entry) (and (frame-live-p (car entry))
+                                         (frame-live-p (cdr entry))))
+                    lispm-ui-field--fields)
+        lispm-ui-field--before
+        (seq-filter (lambda (entry) (frame-live-p (car entry)))
+                    lispm-ui-field--before)))
+
+(add-hook 'delete-frame-functions #'lispm-ui-field--on-delete-frame)
+
 (defun lispm-ui-field-make (frame)
   "Return FRAME's field, making it when missing, and have FRAME read from it.
 FRAME is drawn inside another frame: its field is a minibuffer-only child
@@ -112,45 +129,53 @@ does, cannot take a field."
 
 (defun lispm-ui-field-dispose (frame)
   "Delete FRAME's field; FRAME reads again from where it read before."
-  (let ((field (lispm-ui-field frame)))
-    (when field
-      (setq lispm-ui-field--fields
-            (assq-delete-all frame lispm-ui-field--fields))
-      (let ((before (assq frame lispm-ui-field--before)))
-        (when before
-          (setq lispm-ui-field--before
-                (assq-delete-all frame lispm-ui-field--before))
-          (when (and (frame-live-p frame)
-                     (eq (frame-parameter frame 'minibuffer)
-                         (minibuffer-window field)))
-            (if (cdr before)
-                (set-frame-parameter frame 'minibuffer (cdr before))
-              ;; What FRAME had was Emacs's default, as no minibuffer of its
-              ;; own: reset the parameter.
-              (modify-frame-parameters frame '((minibuffer)))))))
+  (let ((field (or (lispm-ui-field frame)
+                   (let ((entry (alist-get frame lispm-ui-field--fields)))
+                     (and (frame-live-p entry) entry)))))
+    (setq lispm-ui-field--fields
+          (assq-delete-all frame lispm-ui-field--fields))
+    (let ((before (assq frame lispm-ui-field--before)))
+      (when before
+        (setq lispm-ui-field--before
+              (assq-delete-all frame lispm-ui-field--before))
+        (when (and field (frame-live-p frame)
+                   (eq (frame-parameter frame 'minibuffer)
+                       (minibuffer-window field)))
+          (if (cdr before)
+              (set-frame-parameter frame 'minibuffer (cdr before))
+            ;; What FRAME had was Emacs's default, as no minibuffer of its
+            ;; own: reset the parameter.
+            (modify-frame-parameters frame '((minibuffer)))))))
+    (when (frame-live-p field)
+      (lispm-ui-field--stop-echo field)
       (when (frame-visible-p field)
         (make-frame-invisible field t))
       (delete-frame field t))))
 
 (defun lispm-ui-field--make-field (frame)
   "Return a hidden minibuffer-only child frame at the bottom of FRAME."
-  (let ((field (let ((after-make-frame-functions nil)
-                     (before-make-frame-hook nil))
-                 (make-frame
-                  `((parent-frame . ,frame) (minibuffer . only)
-                    (undecorated . t) (visibility . nil)
-                    ;; Keys typed in FRAME read here; shown, the field takes
-                    ;; no focus from FRAME.
-                    (no-accept-focus . t) (no-focus-on-map . t)
-                    (no-other-frame . t) (skip-taskbar . t)
-                    (desktop-dont-save . t) (unsplittable . t)
-                    (menu-bar-lines . 0) (tool-bar-lines . 0) (tab-bar-lines . 0)
-                    (vertical-scroll-bars . nil) (horizontal-scroll-bars . nil)
-                    (left-fringe . 0) (right-fringe . 0)
-                    (no-special-glyphs . t) (line-spacing . 0)
-                    (internal-border-width . 1)
-                    (width . (text-pixels . ,(frame-text-width frame)))
-                    (height . (text-pixels . ,(frame-char-height frame))))))))
+  (let* ((tty (lispm-ui-tty-p frame))
+         (dims (if tty
+                   `((width . ,(max 1 (frame-width frame)))
+                     (height . 1))
+                 `((width . (text-pixels . ,(frame-text-width frame)))
+                   (height . (text-pixels . ,(frame-char-height frame))))))
+         (field (let ((after-make-frame-functions nil)
+                      (before-make-frame-hook nil))
+                  (make-frame
+                   `((parent-frame . ,frame) (minibuffer . only)
+                     (undecorated . t) (visibility . nil)
+                     ;; Keys typed in FRAME read here; shown, the field takes
+                     ;; no focus from FRAME.
+                     (no-accept-focus . t) (no-focus-on-map . t)
+                     (no-other-frame . t) (skip-taskbar . t)
+                     (desktop-dont-save . t) (unsplittable . t)
+                     (menu-bar-lines . 0) (tool-bar-lines . 0) (tab-bar-lines . 0)
+                     (vertical-scroll-bars . nil) (horizontal-scroll-bars . nil)
+                     (left-fringe . 0) (right-fringe . 0)
+                     (no-special-glyphs . t) (line-spacing . 0)
+                     (internal-border-width . 1)
+                     ,@dims)))))
     (when-let* ((chrome (lispm-ui-color :chrome)))
       (set-face-attribute 'internal-border field :background chrome))
     field))
@@ -233,14 +258,19 @@ shows.  This is a `post-command-hook' function, run while read from."
 
 ;;;; Messages
 
-(defvar lispm-ui-field--echo-timer nil
-  "Timer hiding a field after a message.")
-
-(defun lispm-ui-field--stop-echo ()
-  "Let the field shown stay, as it is read from now."
-  (when (timerp lispm-ui-field--echo-timer)
-    (cancel-timer lispm-ui-field--echo-timer))
-  (setq lispm-ui-field--echo-timer nil))
+(defun lispm-ui-field--stop-echo (&optional field)
+  "Let FIELD (or all fields when nil) stay visible without expiring echo timer."
+  (dolist (target (if field (list field) (mapcar #'cdr lispm-ui-field--fields)))
+    (when (frame-live-p target)
+      (when-let* ((timer (frame-parameter target 'lispm-ui-field-echo-timer)))
+        (when (timerp timer)
+          (cancel-timer timer))
+        (when (eq timer lispm-ui-field--echo-timer)
+          (setq lispm-ui-field--echo-timer nil))
+        (set-frame-parameter target 'lispm-ui-field-echo-timer nil))))
+  (when (and (null field) (timerp lispm-ui-field--echo-timer))
+    (cancel-timer lispm-ui-field--echo-timer)
+    (setq lispm-ui-field--echo-timer nil)))
 
 (defun lispm-ui-field--message-lines (message)
   "Return how many lines of a field MESSAGE takes."
@@ -256,18 +286,26 @@ still shows the message."
          (mini (and (not (active-minibuffer-window))
                     (minibuffer-window asking)))
          (field (and mini (window-frame mini))))
-    (when (and (lispm-ui-field-p field)
+    (when (and (stringp message)
+               (not (string-empty-p message))
+               (lispm-ui-field-p field)
                (not (lispm-ui-gui-action-p)))
-      (lispm-ui-field--stop-echo)
+      (lispm-ui-field--stop-echo field)
       (lispm-ui-field-fit field (lispm-ui-field--message-lines message))
       (make-frame-visible field)
-      (setq lispm-ui-field--echo-timer
-            (run-with-timer lispm-ui-field-echo-seconds nil
-                            (lambda ()
-                              (setq lispm-ui-field--echo-timer nil)
-                              (when (and (frame-live-p field)
-                                         (not (active-minibuffer-window)))
-                                (make-frame-invisible field t))))))
+      (let ((timer nil))
+        (setq timer
+              (run-with-timer lispm-ui-field-echo-seconds nil
+                              (lambda ()
+                                (when (eq lispm-ui-field--echo-timer timer)
+                                  (setq lispm-ui-field--echo-timer nil))
+                                (when (frame-live-p field)
+                                  (when (eq (frame-parameter field 'lispm-ui-field-echo-timer) timer)
+                                    (set-frame-parameter field 'lispm-ui-field-echo-timer nil))
+                                  (unless (active-minibuffer-window)
+                                    (make-frame-invisible field t))))))
+        (setq lispm-ui-field--echo-timer timer)
+        (set-frame-parameter field 'lispm-ui-field-echo-timer timer)))
     nil))
 
 (defun lispm-ui-field-setup ()
@@ -276,7 +314,7 @@ so as what it shows changes.  This is a `minibuffer-setup-hook' function,
 run after Vertico's."
   (let ((field (window-frame (minibuffer-window))))
     (when (lispm-ui-field-p field)
-      (lispm-ui-field--stop-echo)
+      (lispm-ui-field--stop-echo field)
       (add-hook 'post-command-hook #'lispm-ui-field-fit-current 90 t)
       (lispm-ui-field-fit field)
       (make-frame-visible field)
@@ -289,7 +327,12 @@ run after Vertico's."
   (run-at-time 0 nil
                (lambda ()
                  (when (zerop (minibuffer-depth))
-                   (lispm-ui-field-hide-all)))))
+                   (dolist (entry lispm-ui-field--fields)
+                     (let ((f (cdr entry)))
+                       (when (and (frame-live-p f)
+                                  (frame-visible-p f)
+                                  (not (timerp (frame-parameter f 'lispm-ui-field-echo-timer))))
+                         (make-frame-invisible f t))))))))
 
 ;;;; Turning them on
 

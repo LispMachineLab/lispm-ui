@@ -105,13 +105,23 @@ draws them as Simplified Chinese does.  The fonts of the classic look
 have no ideographs, and Emacs's own fallback for them is the terminals'
 monospace family, its ideographs a cell apart.")
 
+(defvar lispm-ui-text--cjk-cache (make-hash-table :test #'equal)
+  "Cached CJK font family per `(LANGUAGE . TERMINAL)' pair.")
+
 (defun lispm-ui-text-cjk-family ()
   "Return the family Chinese and Japanese are drawn in, for the language
 LispM UI speaks, or nil when none is installed."
-  (let ((installed (font-family-list)))
-    (seq-find (lambda (family) (member family installed))
-              (or (alist-get (lispm-ui-current-language) lispm-ui-text-cjk-families)
-                  (alist-get 'zh-Hans lispm-ui-text-cjk-families)))))
+  (let* ((lang (lispm-ui-current-language))
+         (key (cons lang (frame-terminal)))
+         (cached (gethash key lispm-ui-text--cjk-cache :miss)))
+    (if (not (eq cached :miss))
+        cached
+      (let* ((installed (font-family-list))
+             (family (seq-find (lambda (candidate) (member candidate installed))
+                               (or (alist-get lang lispm-ui-text-cjk-families)
+                                   (alist-get 'zh-Hans lispm-ui-text-cjk-families)))))
+        (puthash key family lispm-ui-text--cjk-cache)
+        family))))
 
 ;;;; Breaking lines
 
@@ -158,6 +168,20 @@ long for a line stands alone."
           (push line lines)
           (setq line (string-trim-left piece)))))
     (nreverse (if line (cons line lines) lines))))
+
+(defun lispm-ui-text-wrap-pixels (text width &optional face)
+  "Return TEXT broken into lines no wider than WIDTH pixels in FACE.
+Explicit newlines in TEXT start a new wrapped paragraph; a single piece
+wider than WIDTH stands alone."
+  (let ((fits (lambda (line) (<= (lispm-ui-text-width line face) width))))
+    (if (string-empty-p text)
+        nil
+      (cl-mapcan
+       (lambda (para)
+         (if (string-empty-p para)
+             (list "")
+           (or (lispm-ui-text-wrap para fits) (list ""))))
+       (split-string text "\n")))))
 
 (provide 'lispm-ui-text)
 ;;; lispm-ui-text.el ends here

@@ -101,21 +101,7 @@ text terminal, where the form draws it as text."
 (defun lispm-ui-form--well (file)
   "Return an image well holding the picture in FILE, or empty for nil: the
 picture framed in a well sunk into the window, as Mac OS 9 drew one."
-  (lispm-ui-image
-   (list 'form-well file)
-   (lambda ()
-     (let* ((size lispm-ui-form-well-size)
-            (palette lispm-ui-current-palette)
-            (grey (lambda (level) (lispm-ui-grey palette level)))
-            (svg (svg-create (+ size 4) (+ size 4))))
-       ;; Shaded along its top and left, lit along its bottom and right.
-       (lispm-ui-svg-fill svg 0 0 (+ size 4) (+ size 4) (funcall grey #xFF))
-       (lispm-ui-svg-fill svg 0 0 (+ size 3) (+ size 3) (funcall grey #x88))
-       (lispm-ui-svg-fill svg 1 1 (+ size 2) (+ size 2) (plist-get palette :outline))
-       (lispm-ui-svg-fill svg 2 2 size size (plist-get palette :content))
-       (when (and file (file-readable-p file))
-         (lispm-ui-svg-emacs-image svg (create-image file) 2 2 size size))
-       svg))))
+  (lispm-ui-image-well file lispm-ui-form-well-size))
 
 (defun lispm-ui-form-glyph (kind state label)
   "Return the image of a form's control, LispM UI's, or nil for text.
@@ -283,51 +269,87 @@ from `lispm-ui-form-drawn-hook', and from an application's like it."
 Called with BUFFER, it displays BUFFER in a selected window or frame and
 returns a function of no arguments that closes it when the prompt ends.")
 
+(defun lispm-ui-form--modal-tty-dimensions (buffer parent)
+  "Return (COLS . ROWS) cell dimensions for modal BUFFER on TTY PARENT."
+  (let ((max-cols 0)
+        (rows 0))
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (while (not (eobp))
+          (setq max-cols (max max-cols
+                              (string-width (buffer-substring-no-properties
+                                             (line-beginning-position)
+                                             (line-end-position))))
+                rows (1+ rows))
+          (forward-line 1))))
+    (cons (min (max 20 (+ max-cols 4))
+               (max 20 (- (frame-width parent) 2)))
+          (min (max 6 (+ rows 2))
+               (max 6 (- (frame-height parent) 2))))))
+
 (defun lispm-ui-form--modal-show-default (buffer)
   "Show modal form BUFFER in a child frame or window; return a cleanup function."
   (if (and (not noninteractive)
            (or (display-graphic-p) (featurep 'tty-child-frames)))
-      (let* ((parent (selected-frame))
-             (geom (lispm-ui-form-geometry buffer))
-             (outer (or (plist-get geom :outer) 420))
-             (width (+ outer 40))
-             (height (with-current-buffer buffer
-                       (let ((truncate-lines t))
-                         (+ (cdr (buffer-text-pixel-size buffer nil t)) 40))))
-             (frame (let ((after-make-frame-functions nil)
-                          (before-make-frame-hook nil))
-                      (make-frame
-                       `((parent-frame . ,parent)
-                         (minibuffer . nil)
-                         (undecorated . ,(not (lispm-ui-tty-p parent)))
-                         (unsplittable . t) (no-other-frame . t)
-                         (child-frame-border-width . 1) (internal-border-width . 0)
-                         (left-fringe . 0) (right-fringe . 0)
-                         (vertical-scroll-bars . nil) (horizontal-scroll-bars . nil)
-                         (menu-bar-lines . 0) (tool-bar-lines . 0) (tab-bar-lines . 0)
-                         (desktop-dont-save . t) (visibility . nil)
-                         (background-color . ,(or (lispm-ui-color :chrome)
-                                                  (frame-parameter parent 'background-color)))
-                         (foreground-color . ,(or (lispm-ui-color :text)
-                                                  (frame-parameter parent 'foreground-color)))
-                         (width . 50) (height . 10)))))
-             (root (frame-root-window frame)))
-        (set-window-buffer root buffer)
-        (set-window-dedicated-p root t)
-        (set-window-fringes root 0 0)
-        (let ((frame-resize-pixelwise t))
-          (set-frame-size frame width (max 140 height) t))
-        (set-frame-position frame
-                            (max 0 (/ (- (frame-pixel-width parent) width) 2))
-                            (max 0 (/ (- (frame-pixel-height parent) height) 3)))
-        (make-frame-visible frame)
-        (select-frame-set-input-focus frame)
-        (select-window root)
-        (lambda ()
-          (when (frame-live-p frame)
-            (delete-frame frame t))
-          (when (frame-live-p parent)
-            (select-frame-set-input-focus parent))))
+      (let* ((prev-frame (selected-frame))
+             (parent prev-frame))
+        (while (frame-parent parent)
+          (setq parent (frame-parent parent)))
+        (let* ((tty (lispm-ui-tty-p parent))
+               (tty-dims (and tty (lispm-ui-form--modal-tty-dimensions buffer parent)))
+               (geom (unless tty (lispm-ui-form-geometry buffer)))
+               (outer (or (plist-get geom :outer) 420))
+               (width (if tty (car tty-dims) (+ outer 40)))
+               (height (if tty
+                           (cdr tty-dims)
+                         (max 140
+                              (with-current-buffer buffer
+                                (let ((truncate-lines t))
+                                  (+ (cdr (buffer-text-pixel-size buffer nil t)) 40))))))
+               (frame (let ((after-make-frame-functions nil)
+                            (before-make-frame-hook nil))
+                        (make-frame
+                         `((parent-frame . ,parent)
+                           (minibuffer . nil)
+                           (undecorated . ,(not tty))
+                           (unsplittable . t) (no-other-frame . t)
+                           (child-frame-border-width . 1) (internal-border-width . 0)
+                           (left-fringe . 0) (right-fringe . 0)
+                           (vertical-scroll-bars . nil) (horizontal-scroll-bars . nil)
+                           (menu-bar-lines . 0) (tool-bar-lines . 0) (tab-bar-lines . 0)
+                           (desktop-dont-save . t) (visibility . nil)
+                           (background-color . ,(or (lispm-ui-color :chrome)
+                                                    (frame-parameter parent 'background-color)))
+                           (foreground-color . ,(or (lispm-ui-color :text)
+                                                    (frame-parameter parent 'foreground-color)))
+                           (width . ,(if tty width 50))
+                           (height . ,(if tty height 10))))))
+               (root (frame-root-window frame)))
+          (set-window-buffer root buffer)
+          (set-window-dedicated-p root t)
+          (set-window-fringes root 0 0)
+          (if tty
+              (progn
+                (set-frame-size frame width height)
+                (set-frame-position frame
+                                    (max 0 (/ (- (frame-width parent) width) 2))
+                                    (max 0 (/ (- (frame-height parent) height) 3))))
+            (let ((frame-resize-pixelwise t))
+              (set-frame-size frame width height t))
+            (set-frame-position frame
+                                (max 0 (/ (- (frame-pixel-width parent) width) 2))
+                                (max 0 (/ (- (frame-pixel-height parent) height) 3))))
+          (make-frame-visible frame)
+          (select-frame-set-input-focus frame)
+          (select-window root)
+          (lambda ()
+            (when (frame-live-p frame)
+              (delete-frame frame t))
+            (cond ((frame-live-p prev-frame)
+                   (select-frame-set-input-focus prev-frame))
+                  ((frame-live-p parent)
+                   (select-frame-set-input-focus parent))))))
     (let ((config (current-window-configuration)))
       (pop-to-buffer buffer)
       (lambda ()
@@ -388,11 +410,11 @@ field widgets."
                 :value ,init-val :submit t :validate ,validate ,@change-prop))))))
 
 (defun lispm-ui-form--setup-modal-keymap ()
-  "Bind `keyboard-quit' and `ESC' to `lispm-ui-form-cancel' in a local keymap copy."
+  "Bind `keyboard-quit', `<escape>', and `ESC ESC' to `lispm-ui-form-cancel'."
   (use-local-map (copy-keymap (current-local-map)))
   (local-set-key [remap keyboard-quit] #'lispm-ui-form-cancel)
-  (local-set-key (kbd "ESC") #'lispm-ui-form-cancel)
-  (local-set-key (kbd "<escape>") #'lispm-ui-form-cancel))
+  (local-set-key (kbd "<escape>") #'lispm-ui-form-cancel)
+  (local-set-key (kbd "ESC ESC") #'lispm-ui-form-cancel))
 
 (defun lispm-ui-form--prompt-browse-buttons (title init-val base-dir choice-pairs buffer-fn)
   "Return the `Choose…' button spec for `lispm-ui-form-prompt'."
@@ -418,18 +440,35 @@ field widgets."
 
 (defun lispm-ui-form--run-modal-buffer (buffer)
   "Show modal form BUFFER, run `recursive-edit', and clean up on exit."
-  (let ((cleanup nil))
+  (let ((orig-frame (selected-frame))
+        (modal-frame nil)
+        (cleanup nil)
+        (closing nil)
+        (on-delete-frame nil))
+    (setq on-delete-frame
+          (lambda (frame)
+            (when (and (not closing)
+                       modal-frame
+                       (eq frame modal-frame)
+                       (buffer-live-p buffer))
+              (with-current-buffer buffer
+                (lispm-ui-form-cancel)))))
     (unwind-protect
         (progn
           (setq cleanup (funcall lispm-ui-form-modal-show-function buffer))
+          (let ((shown-frame (selected-frame)))
+            (unless (eq shown-frame orig-frame)
+              (setq modal-frame shown-frame)
+              (add-hook 'delete-frame-functions on-delete-frame)))
           (with-current-buffer buffer
             (lispm-ui-form--first-field)
             (lispm-ui-form--keep-point)
             (when lispm-ui-current-palette
               (lispm-ui-form--follow)))
-          (let ((lispm-ui-in-gui-action nil)
-                (lispm-ui--command-from-mouse nil))
+          (lispm-ui-without-gui-action
             (recursive-edit)))
+      (setq closing t)
+      (remove-hook 'delete-frame-functions on-delete-frame)
       (when (functionp cleanup)
         (ignore-errors (funcall cleanup)))
       (when (buffer-live-p buffer)
@@ -593,8 +632,7 @@ be shown."
                                                        (not (string-empty-p (string-trim val)))
                                                        (expand-file-name (string-trim val) base-dir))))
                                          (unless (and dir (file-directory-p dir))
-                                           (lispm-ui-tr "%s: fill this in"
-                                                        (lispm-ui-tr "Where"))))))
+                                           (lispm-ui-tr "Choose an existing folder")))))
               (:browse :type buttons :buttons ,browse-buttons)))
            (values (condition-case nil
                        (lispm-ui-form-modal

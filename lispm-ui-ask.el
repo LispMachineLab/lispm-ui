@@ -282,8 +282,7 @@ DEFAULT is used when submitted empty."
        prompt :default default :password t
        :validate (lambda (val)
                    (unless (equal (or val default "") first)
-                     (lispm-ui-tr "%s: fill this in"
-                                  (lispm-ui--clean-prompt prompt)))))
+                     (lispm-ui-tr "Passwords do not match"))))
       first)))
 
 (defun lispm-ui--form-read-number (prompt &optional default)
@@ -297,8 +296,7 @@ DEFAULT is used when submitted empty."
                               (unless (string-match-p
                                        "\\`[ \t]*[-+]?[0-9]*\\.?[0-9]+\\([eE][-+]?[0-9]+\\)?[ \t]*\\'"
                                        s)
-                                (lispm-ui-tr "%s: fill this in"
-                                             (lispm-ui--clean-prompt prompt))))))))
+                                (lispm-ui-tr "Enter a valid number")))))))
     (string-to-number text)))
 
 (cl-defun lispm-ui-read-string (prompt &key initial default choices
@@ -485,7 +483,6 @@ Uses a modal form when available, else `read-number'."
          (init (or (and (stringp initial) (not (string-empty-p initial)) initial)
                    (car dirs)
                    (abbreviate-file-name base-dir)))
-         (clean (lispm-ui--clean-prompt prompt))
          (chosen (lispm-ui-form-prompt
                   prompt
                   :initial init
@@ -496,7 +493,7 @@ Uses a modal form when available, else `read-number'."
                                               (not (string-empty-p (string-trim val)))
                                               (expand-file-name (string-trim val) base-dir))))
                                 (unless (and dir (file-directory-p dir))
-                                  (lispm-ui-tr "%s: fill this in" clean)))))))
+                                  (lispm-ui-tr "Choose an existing folder")))))))
     (file-name-as-directory (expand-file-name (string-trim chosen) base-dir))))
 
 (defun lispm-ui--intercept-project-prompt-project-dir (orig-fn &rest args)
@@ -549,8 +546,7 @@ Uses a modal form when available, else `read-number'."
                                                (string-empty-p s))
                                           (test-completion s collection predicate)
                                           (member s candidates))
-                                (lispm-ui-tr "%s: fill this in"
-                                             (lispm-ui--clean-prompt prompt))))))))))
+                                (lispm-ui-tr "Choose one of the listed options")))))))))
     (funcall orig-fn prompt collection predicate require-match
              initial-input hist def inherit-input-method)))
 

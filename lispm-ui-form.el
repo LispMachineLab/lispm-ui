@@ -217,6 +217,8 @@ default the current buffer: an alist (KEY . WIDGET)."
   :parent widget-keymap
   "C-c C-c" #'lispm-ui-form-submit
   "C-c C-k" #'lispm-ui-form-cancel
+  "M-a" #'lispm-ui-form-select-field
+  "s-a" #'lispm-ui-form-select-field
   "<down-mouse-1>" #'lispm-ui-form--mouse
   "<mouse-1>" #'lispm-ui-form--mouse
   "<drag-mouse-1>" #'lispm-ui-form--mouse
@@ -245,6 +247,11 @@ TAB and S-TAB go from field to field, \\[lispm-ui-form-submit] submits it,
   ;; A new line of a text area starts where its panel does, not indented
   ;; under the label beside its first.
   (electric-indent-local-mode -1)
+  (setq-local yank-excluded-properties
+              (let ((base (default-value 'yank-excluded-properties)))
+                (append '(face display lispm-ui-form-padding)
+                        (and (listp base) base))))
+  (add-hook 'pre-command-hook #'lispm-ui-form--replace-marked nil t)
   (add-hook 'post-command-hook #'lispm-ui-form--keep-point nil t))
 
 ;;;; Reactive state graph

@@ -62,6 +62,7 @@
 (declare-function lispm-ui-form--columns "lispm-ui-form" (rows start))
 (declare-function lispm-ui-form--draw-row "lispm-ui-form" (key row columns))
 (declare-function lispm-ui-form--help "lispm-ui-form" (help at))
+(declare-function lispm-ui-form--apply-text-props "lispm-ui-form-ext" (widget props value))
 (declare-function lispm-ui-form--choices "lispm-ui-form" (field))
 (declare-function lispm-ui-form--insert-buttons "lispm-ui-form" (key buttons))
 (declare-function lispm-ui-form-submit "lispm-ui-form" ())
@@ -85,6 +86,7 @@
                          :format "%v"
                          :value (or value "")
                          :lispm-form-width (plist-get props :width)
+                         :lispm-form-props props
                          :action (if (plist-get props :submit)
                                      (lambda (&rest _) (lispm-ui-form-submit))
                                    (lambda (&rest _) (widget-forward 1)))
@@ -287,7 +289,9 @@ of its face, framed once."
                                  (- end 2)
                                (1- end))
                              'invisible t)
-          (put-text-property (1- end) end 'display `(space :align-to (,right))))))))
+          (put-text-property (1- end) end 'display `(space :align-to (,right))))))
+    (when-let* ((props (widget-get widget :lispm-form-props)))
+      (lispm-ui-form--apply-text-props widget props (widget-value widget)))))
 
 (defun lispm-ui-form--field-window (widget start end point width)
   "What the text field WIDGET shows of its text from START to END: (FROM . TO).

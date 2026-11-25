@@ -4,7 +4,7 @@
 
 ;; Author: Ryan.K
 ;; URL: https://github.com/LispMachineLab/lispm-ui
-;; Version: 0.13.1
+;; Version: 0.14.0
 ;; Package-Requires: ((emacs "30.1"))
 ;; Keywords: convenience, faces, mouse
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
@@ -111,7 +111,10 @@
 ;;                      widgets and controls inside forms
 ;;   lispm-ui-form-dress.el
 ;;                      dressing Custom and Widget buffers as forms
+;;   lispm-ui-form-ext.el
+;;                      Form 2.0 open field registry, rich widgets, and validation
 ;;   lispm-ui-form.el   forms, written as data
+;;   lispm-kit-app.el   App Kit 2.0 declarative shell (`lispm-kit-define-app')
 ;;
 ;; lispm-form.el keeps the names LispM's forms had before they moved
 ;; here, for programs written for them.
@@ -158,6 +161,7 @@
 (require 'lispm-ui-file-dialog)
 (require 'lispm-ui-form-widgets)
 (require 'lispm-ui-form-dress)
+(require 'lispm-ui-form-ext)
 (require 'lispm-ui-form)
 (require 'lispm-ui-spotlight)
 (require 'lispm-ui-stage)
@@ -165,6 +169,7 @@
 (require 'lispm-ui-scene-sprites)
 (require 'lispm-ui-scene)
 (require 'lispm-ui-sheet)
+(require 'lispm-kit-app)
 
 (provide 'lispm-ui)
 ;;; lispm-ui.el ends here

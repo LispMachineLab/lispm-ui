@@ -33,6 +33,8 @@
 ;;                          once: its keys, its menus, its main commands
 ;;   lispm-kit-i18n.el      a program's words, in the language spoken,
 ;;                          from catalogs of its own
+;;   lispm-kit-app.el       declarative App Kit 2.0 shell, store, routing,
+;;                          persistence, and lifecycle (`lispm-kit-define-app')
 ;;
 ;; It is an application's to require, and knows of no interface:
 ;; Emacs's own shows what an application declares as it shows any
@@ -44,6 +46,9 @@
 
 (require 'lispm-kit-commands)
 (require 'lispm-kit-i18n)
+
+(autoload 'lispm-kit-define-app "lispm-kit-app" nil nil 'macro)
+(autoload 'lispm-kit-app-launch "lispm-kit-app")
 
 (provide 'lispm-kit)
 ;;; lispm-kit.el ends here

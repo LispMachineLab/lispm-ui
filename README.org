@@ -36,9 +36,22 @@ the same wherever it is shown, on LispM's desktop or in plain Emacs.  In code, t
 | =lispm-ui-alert.el=   | alerts, drawn as Mac OS 9 drew them, or in text on a text terminal                                                      |
 | =lispm-ui-menu.el=    | menus, drawn as Mac OS 9 drew them, submenus beside their items; choices shown in one                                   |
 | =lispm-ui-file-dialog.el= | the dialog choosing a file: a folder's list, the usual places, the files chosen lately, a picture's preview       |
+| =lispm-ui-form-ext.el= | Form 2.0 open field registry, 9 rich widgets (`switch`, `slider`, `combobox`, `tags`, `repeater`, etc.), inline/async validation, dirty/reset, collapsible sections |
 | =lispm-ui-form.el=    | forms, written as data                                                                                                   |
+| =lispm-ui-frp-async.el= | reactive resources (`loading`/`ok`/`error`), rate-limited streams, and slice stores                                      |
+| =lispm-ui-tokens.el=  | semantic color roles, WCAG AA/AAA contrast helpers, spacing, radius, and typography faces                                |
+| =lispm-ui-icons-catalog.el= | 52 built-in 16×16 stroke vector UI icons with theme-aware tinting                                                   |
+| =lispm-ui-view.el=    | UI buffer hygiene base mode (`lispm-ui-view-mode`), focus cycling, and scroll preservation                              |
+| =lispm-ui-layout.el=  | compositional `vstack`, `hstack`, `card`, `grid`, `toolbar`, `footer-bar`, and multi-pane `lispm-ui-split`               |
+| =lispm-ui-controls-extra.el= | semantic buttons (`primary`/`ghost`/`destructive`), switch, slider, stepper, segmented control, tristate checkbox  |
+| =lispm-ui-input.el=   | embeddable read-only-buffer TextInput, Combobox, and TagInput with IME & selection-replace semantics                     |
+| =lispm-ui-feedback.el= | progress bars, single shared spinner timer, skeleton, badge, avatar, empty state, banner, and toast queue                |
+| =lispm-ui-overlay.el= | viewport-aware popover, async/modal dialog, slide-over drawer, and fuzzy Command Palette                                 |
+| =lispm-ui-data.el=    | virtualized ListView, sortable DataTable, TreeView, Accordion, and KV property sheet                                     |
+| =lispm-ui-rich.el=    | pagination, breadcrumb, wizard stepper, markdown, and unified/inline diff views                                          |
 | =lispm-finder.el=     | the spatial 32×32 icon-grid file manager and modal file/folder chooser (=lispm-finder-i18n.el= its words)                |
 | =lispm-kit.el=        | an application's commands declared once (=lispm-kit-commands.el=) and its words in the language spoken (=lispm-kit-i18n.el=, =lispm-kit-i18n-check.el=) |
+| =lispm-kit-app.el=    | declarative App Kit 2.0 shell (=lispm-kit-define-app=), routing, `.eld` persistence, Command Palette & lifecycle hooks  |
 | =lispm-prebuilt.el=   | native modules and programs of LispM's packages, downloaded, SHA-256 checked, and loaded                                 |
 
 =lispm-ui.el= loads the UI and Kit parts; =lispm-finder= and =lispm-prebuilt= load when required.
@@ -201,8 +214,28 @@ Elsewhere, from git:
 (package-vc-install "https://github.com/LispMachineLab/lispm-ui")
 #+end_src
 
-An application names it in its =Package-Requires=, as ~(lispm-ui "0.8.0")~, and requires the part
+An application names it in its =Package-Requires=, as ~(lispm-ui "0.14.0")~, and requires the part
 it uses (~lispm-ui~, ~lispm-kit~, ~lispm-finder~, or ~lispm-prebuilt~).
+
+* Design System 2.0, Form 2.0 & App Kit (~lispm-kit-define-app~)
+
+Custom apps can compose complete UI views out of layout primitives (~lispm-ui-vstack~,
+~lispm-ui-hstack~, ~lispm-ui-card~, ~lispm-ui-split~), modern controls (~lispm-ui-insert-input~,
+~lispm-ui-insert-combobox~, ~lispm-ui-table-render~, ~lispm-ui-list-view-render~,
+~lispm-ui-command-palette~, ~lispm-ui-toast~), extensible forms (~lispm-ui-form-define-type~),
+and declarative application shells:
+
+#+begin_src emacs-lisp
+(lispm-kit-define-app my-inspector
+  :title "My Inspector"
+  :version "1.0.0"
+  :layout 'master-detail
+  :initial-state '(:count 0 :items ("Alpha" "Beta"))
+  :routes `((home :label "Overview"
+                  :render ,(lambda (_app state _params)
+                             (lispm-ui-kv-render
+                              `((:key cnt :label "Count" :value ,(format "%s" (plist-get state :count)))))))))
+#+end_src
 
 * Testing
 

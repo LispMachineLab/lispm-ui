@@ -65,6 +65,8 @@
   (dependents nil :type list)
   (effects nil :type list)
   (cleanups nil :type list)
+  (version 0 :type integer)
+  (source-versions nil :type list)
   (disposed nil :type boolean))
 
 (cl-defstruct (lispm-ui-effect
@@ -178,6 +180,7 @@ their current values whenever any source changes.  TEST defaults to `equal'."
                    :test (or test #'equal)
                    :compute compute
                    :sources (copy-sequence sources)
+                   :source-versions (mapcar #'lispm-ui-signal-version sources)
                    :level level)))
     (dolist (source sources)
       (cl-pushnew derived (lispm-ui-signal-dependents source) :test #'eq))
@@ -296,17 +299,28 @@ Return SIGNAL."
     (dolist (source (lispm-ui-signal-sources signal))
       (when (lispm-ui-signal-stale source)
         (lispm-ui-signal--recompute source)))
-    (let ((next (apply (lispm-ui-signal-compute signal)
-                       (mapcar #'lispm-ui-signal-value
-                               (lispm-ui-signal-sources signal))))
-          (old (lispm-ui-signal-value signal)))
-      (setf (lispm-ui-signal-stale signal) nil)
-      (setq lispm-ui-frp--pending-signals
-            (delq signal lispm-ui-frp--pending-signals))
-      (unless (funcall (lispm-ui-signal-test signal) old next)
-        (setf (lispm-ui-signal-value signal) next)
-        (lispm-ui-frp--enqueue-effects signal)
-        t))))
+    (let ((cur-versions (mapcar #'lispm-ui-signal-version
+                                (lispm-ui-signal-sources signal))))
+      (if (and (lispm-ui-signal-source-versions signal)
+               (equal cur-versions (lispm-ui-signal-source-versions signal)))
+          (progn
+            (setf (lispm-ui-signal-stale signal) nil)
+            (setq lispm-ui-frp--pending-signals
+                  (delq signal lispm-ui-frp--pending-signals))
+            nil)
+        (let ((next (apply (lispm-ui-signal-compute signal)
+                           (mapcar #'lispm-ui-signal-value
+                                   (lispm-ui-signal-sources signal))))
+              (old (lispm-ui-signal-value signal)))
+          (setf (lispm-ui-signal-stale signal) nil
+                (lispm-ui-signal-source-versions signal) cur-versions)
+          (setq lispm-ui-frp--pending-signals
+                (delq signal lispm-ui-frp--pending-signals))
+          (unless (funcall (lispm-ui-signal-test signal) old next)
+            (setf (lispm-ui-signal-value signal) next)
+            (cl-incf (lispm-ui-signal-version signal))
+            (lispm-ui-frp--enqueue-effects signal)
+            t))))))
 
 (defun lispm-ui-signal-get (signal)
   "Return the current up-to-date value of SIGNAL."
@@ -413,6 +427,7 @@ propagate once in topological order when the outermost batch commits."
   (let ((old (lispm-ui-signal-value signal)))
     (unless (funcall (lispm-ui-signal-test signal) old value)
       (setf (lispm-ui-signal-value signal) value)
+      (cl-incf (lispm-ui-signal-version signal))
       (lispm-ui-frp-batch
         (lispm-ui-frp--mark-dependents signal)
         (lispm-ui-frp--enqueue-effects signal))))

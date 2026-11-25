@@ -36,14 +36,20 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
 (require 'lispm-ui-base)
 (require 'lispm-ui-palette)
+(require 'lispm-ui-tokens)
+(require 'lispm-ui-icons-catalog)
 (require 'lispm-ui-raster)
 
 (defvar lispm-ui--icons (make-hash-table :test #'equal)
-  "Icon images by name.")
+  "Icon images by name or `(FILE-OR-NAME SIZE TINT)' key.")
+
+(defvar lispm-ui--icon-registry (make-hash-table :test #'equal)
+  "Declarative icon registry mapping normalized name to (:file :svg :tty).")
 
 (defvar lispm-ui-icon-functions nil
   "Functions finding the file of an icon by its name, tried in turn before
@@ -51,6 +57,84 @@ LispM UI's own icons: each is called with the name, as
 `lispm-ui-icon-file' takes it, and returns a file, or nil to leave it to
 the next.  An interface drawing its own icons, as a desktop's look
 does, adds one.")
+
+(defun lispm-ui--icon-key (name)
+  "Return normalized string key for icon NAME."
+  (if (symbolp name) (symbol-name name) (or name "")))
+
+(defun lispm-ui--evict-icon-cache (key)
+  "Remove cached rendered icons matching KEY from `lispm-ui--icons'."
+  (remhash key lispm-ui--icons)
+  (maphash (lambda (k _v)
+             (when (and (consp k) (equal (car k) key))
+               (remhash k lispm-ui--icons)))
+           lispm-ui--icons))
+
+(cl-defun lispm-ui-icon-register (name &key file svg tty)
+  "Register icon NAME with FILE path, raw SVG string, and/or TTY glyph.
+Return normalized string name."
+  (let ((key (lispm-ui--icon-key name)))
+    (puthash key (list :file file :svg svg :tty tty) lispm-ui--icon-registry)
+    (lispm-ui--evict-icon-cache key)
+    key))
+
+(defun lispm-ui-icon-unregister (name)
+  "Remove custom registration for icon NAME."
+  (let ((key (lispm-ui--icon-key name)))
+    (prog1 (remhash key lispm-ui--icon-registry)
+      (lispm-ui--evict-icon-cache key))))
+
+(defun lispm-ui-icon-names ()
+  "Return sorted list of all available icon names."
+  (let ((names (mapcar #'car lispm-ui-icons-catalog))
+        (dir (expand-file-name "icons" lispm-ui-directory)))
+    (maphash (lambda (k _v) (push k names)) lispm-ui--icon-registry)
+    (when (file-directory-p dir)
+      (dolist (f (directory-files dir nil "\\.svg\\'"))
+        (push (file-name-sans-extension f) names)))
+    (sort (delete-dups names) #'string<)))
+
+(defun lispm-ui-icon-p (name)
+  "Return non-nil when icon NAME exists in registry, catalog, or bundled SVG."
+  (let ((key (lispm-ui--icon-key name)))
+    (or (not (null (gethash key lispm-ui--icon-registry)))
+        (not (null (lispm-ui-icons-catalog-entry key)))
+        (file-readable-p (lispm-ui-icon-file name)))))
+
+(defun lispm-ui--resolve-tint (tint)
+  "Resolve TINT (keyword token, color string, or nil) to a `#rrggbb' string."
+  (let ((raw (cond
+              ((keywordp tint) (lispm-ui-token tint))
+              ((stringp tint) tint)
+              (t (lispm-ui-color :text)))))
+    (or (and raw (lispm-ui-color-hex raw))
+        raw
+        "#000000")))
+
+(cl-defun lispm-ui-icon-svg (name &key (size 16) tint)
+  "Return rendered SVG string for icon NAME at SIZE pixels tinted to TINT."
+  (let* ((key (lispm-ui--icon-key name))
+         (reg (gethash key lispm-ui--icon-registry))
+         (cat (lispm-ui-icons-catalog-entry key))
+         (sz (or size 16))
+         (color (lispm-ui--resolve-tint tint))
+         (raw
+          (cond
+           ((plist-get reg :svg))
+           ((and (plist-get reg :file) (file-readable-p (plist-get reg :file)))
+            (with-temp-buffer
+              (insert-file-contents (plist-get reg :file))
+              (buffer-string)))
+           ((plist-get cat :svg-body)
+            (format
+             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"%d\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"%s\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\">%s</svg>"
+             sz sz color (plist-get cat :svg-body)))
+           ((file-readable-p (lispm-ui-icon-file name))
+            (with-temp-buffer
+              (insert-file-contents (lispm-ui-icon-file name))
+              (buffer-string))))))
+    (when raw
+      (replace-regexp-in-string "currentColor" color raw t t))))
 
 (defun lispm-ui-icon-file (name)
   "Return the file of icon NAME: an absolute file name as it is, as an
@@ -91,19 +175,28 @@ is a Nerd Font can be given its icons here.")
   "The colour each icon is drawn in most, by name, see
 `lispm-ui-text-icon'.")
 
-(defun lispm-ui-text-icon (name)
-  "Return what stands for icon NAME on a text terminal, see
-`lispm-ui-text-icons', in the colour the icon is drawn in most, see
-`lispm-ui-raster-color'."
-  (let* ((color (with-memoization (gethash name lispm-ui--icon-colors)
-                  (when-let* ((pixels (lispm-ui-raster
-                                       (lispm-ui-icon-file name) 16)))
-                    (lispm-ui-raster-color pixels))))
-         (name (if (symbolp name) (symbol-name name) (file-name-base name)))
-         (match (car (sort (seq-filter (lambda (entry) (string-prefix-p (car entry) name))
-                                       lispm-ui-text-icons)
-                           (lambda (a b) (> (length (car a)) (length (car b))))))))
-    (propertize (truncate-string-to-width (or (cdr match) "·") 1 nil ?\s)
+(defun lispm-ui-text-icon (name &optional tint)
+  "Return what stands for icon NAME on a text terminal, see `lispm-ui-text-icons'.
+Optional TINT specifies a color string or token overriding icon color inference."
+  (let* ((key (lispm-ui--icon-key name))
+         (reg (gethash key lispm-ui--icon-registry))
+         (cat (and (not reg) (lispm-ui-icons-catalog-entry key)))
+         (custom-glyph (or (plist-get reg :tty) (plist-get cat :tty)))
+         (color (if tint
+                    (lispm-ui--resolve-tint tint)
+                  (with-memoization (gethash name lispm-ui--icon-colors)
+                    (when-let* ((file (or (plist-get reg :file)
+                                          (lispm-ui-icon-file name)))
+                                ((file-readable-p file))
+                                (pixels (lispm-ui-raster file 16)))
+                      (lispm-ui-raster-color pixels)))))
+         (base (if (symbolp name) (symbol-name name) (file-name-base name)))
+         (match (and (not custom-glyph)
+                     (car (sort (seq-filter (lambda (entry) (string-prefix-p (car entry) base))
+                                            lispm-ui-text-icons)
+                                (lambda (a b) (> (length (car a)) (length (car b))))))))
+         (glyph (or custom-glyph (cdr match) "·")))
+    (propertize (truncate-string-to-width glyph 1 nil ?\s)
                 'face (if color
                           `(:inherit lispm-ui-list :foreground ,color)
                         'lispm-ui-list))))
@@ -144,23 +237,64 @@ it; it is drawn from its own drawing of that size or twice it, see
       (when-let* ((pixels (lispm-ui-raster file size)))
         (lispm-ui-text-picture pixels selected background)))))
 
-(defun lispm-ui-icon (name)
-  "Return icon NAME as a string one icon wide.
-NAME is as `lispm-ui-icon-file' takes it.  On a text terminal a
-character stands in, see `lispm-ui-text-icons'; elsewhere where images
-cannot be shown, a blank."
-  (let ((file (lispm-ui-icon-file name)))
-    ;; The icon carries a face of its own, so a button it sits in, such as
-    ;; a list row, does not underline it.
+(defun lispm-ui--icon-cached-svg-image (key sz color svg-fn)
+  "Return cached SVG image for KEY at size SZ pixels in COLOR via SVG-FN."
+  (let ((ckey (list key sz color)))
+    (or (gethash ckey lispm-ui--icons)
+        (when-let* ((svg (funcall svg-fn)))
+          (when (> (hash-table-count lispm-ui--icons) 512)
+            (clrhash lispm-ui--icons))
+          (puthash ckey
+                   (create-image svg 'svg t :width sz :height sz :ascent 'center)
+                   lispm-ui--icons)))))
+
+(cl-defun lispm-ui-icon (name &key size tint)
+  "Return icon NAME as a propertized string one icon wide.
+NAME is resolved via the icon registry, bundled files, or built-in catalog.
+Optional SIZE (default 16) sets pixel dimensions; optional TINT colors
+vector SVG icons or TTY fallback glyphs."
+  (let* ((key (lispm-ui--icon-key name))
+         (sz (or size 16))
+         (reg (gethash key lispm-ui--icon-registry))
+         (cat (lispm-ui-icons-catalog-entry key))
+         (file (unless reg (lispm-ui-icon-file name))))
     (cond
-     ((lispm-ui-tty-p) (lispm-ui-text-icon name))
-     ((and (display-images-p) (file-readable-p file))
-      (propertize " " 'face 'lispm-ui-list
-                  'display (or (gethash file lispm-ui--icons)
-                               (puthash file (create-image file nil nil :height 16
-                                                           :ascent 'center)
-                                        lispm-ui--icons))))
-     (t (propertize " " 'face 'lispm-ui-list 'display '(space :width (16)))))))
+     ((lispm-ui-tty-p) (lispm-ui-text-icon name tint))
+     ((not (display-images-p))
+      (propertize " " 'face 'lispm-ui-list 'display `(space :width (,sz))))
+     ((plist-get reg :svg)
+      (let ((color (lispm-ui--resolve-tint tint)))
+        (propertize " " 'face 'lispm-ui-list
+                    'display (lispm-ui--icon-cached-svg-image
+                              key sz color
+                              (lambda () (lispm-ui-icon-svg name :size sz :tint color))))))
+     ((and (plist-get reg :file) (file-readable-p (plist-get reg :file)))
+      (let* ((f (plist-get reg :file))
+             (ckey (list f sz nil)))
+        (propertize " " 'face 'lispm-ui-list
+                    'display (or (gethash ckey lispm-ui--icons)
+                                 (puthash ckey (create-image f nil nil :height sz :ascent 'center)
+                                          lispm-ui--icons)))))
+     ((and (or tint size) cat)
+      (let ((color (lispm-ui--resolve-tint tint)))
+        (propertize " " 'face 'lispm-ui-list
+                    'display (lispm-ui--icon-cached-svg-image
+                              key sz color
+                              (lambda () (lispm-ui-icon-svg name :size sz :tint color))))))
+     ((and file (file-readable-p file))
+      (let ((cache-key (if size (list file sz nil) file)))
+        (propertize " " 'face 'lispm-ui-list
+                    'display (or (gethash cache-key lispm-ui--icons)
+                                 (puthash cache-key (create-image file nil nil :height sz
+                                                                  :ascent 'center)
+                                          lispm-ui--icons)))))
+     (cat
+      (let ((color (lispm-ui--resolve-tint tint)))
+        (propertize " " 'face 'lispm-ui-list
+                    'display (lispm-ui--icon-cached-svg-image
+                              key sz color
+                              (lambda () (lispm-ui-icon-svg name :size sz :tint color))))))
+     (t (propertize " " 'face 'lispm-ui-list 'display `(space :width (,sz)))))))
 
 ;;;; Files' icons
 

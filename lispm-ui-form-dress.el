@@ -57,6 +57,7 @@
 (declare-function lispm-ui-form-cancel "lispm-ui-form" ())
 (declare-function lispm-ui-form--first-field "lispm-ui-form" ())
 (declare-function lispm-ui-form--keep-point "lispm-ui-form-widgets" ())
+(declare-function lispm-ui--save-file-in-minibuffer "lispm-ui-ask" (title directory name))
 
 ;;;; Dressing
 
@@ -282,11 +283,6 @@ from `lispm-ui-form-drawn-hook', and from an application's like it."
 Called with BUFFER, it displays BUFFER in a selected window or frame and
 returns a function of no arguments that closes it when the prompt ends.")
 
-(defvar lispm-ui-form-prompt-function nil
-  "Optional function overriding `lispm-ui-form-prompt'.
-When non-nil, called with (PROMPT &key INITIAL DEFAULT PASSWORD CHOICES
-REQUIRE-MATCH VALIDATE).")
-
 (defun lispm-ui-form--modal-show-default (buffer)
   "Show modal form BUFFER in a child frame or window; return a cleanup function."
   (if (and (not noninteractive)
@@ -355,13 +351,17 @@ REQUIRE-MATCH VALIDATE).")
             (select-frame-set-input-focus modal-frame)))
       (quit nil))))
 
-(defun lispm-ui-form--prompt-fields (title init-val password choice-pairs require-match validate choose-directory browse-buttons on-preset)
-  "Construct the field specification list for `lispm-ui-form-prompt'."
-  (let ((val-type (if password 'password 'text)))
+(defun lispm-ui-form--prompt-fields (title init-val password choice-pairs require-match validate choose-directory browse-buttons on-preset &optional on-change)
+  "Construct the field specification list for `lispm-ui-form-prompt'.
+TITLE, INIT-VAL, PASSWORD, CHOICE-PAIRS, REQUIRE-MATCH, VALIDATE,
+CHOOSE-DIRECTORY, BROWSE-BUTTONS, ON-PRESET and ON-CHANGE configure the
+field widgets."
+  (let ((val-type (if password 'password 'text))
+        (change-prop (when on-change (list :on-change on-change))))
     (cond
      (choose-directory
       `((:value :type ,val-type :label ,title
-                :value ,init-val :submit t :validate ,validate)
+                :value ,init-val :submit t :validate ,validate ,@change-prop)
         ,@(if choice-pairs
               `((:preset :type choice :label ,(lispm-ui-tr "Choose")
                          :value ,(and (assoc init-val choice-pairs) init-val)
@@ -374,17 +374,18 @@ REQUIRE-MATCH VALIDATE).")
       `((:value :type choice :label ,title
                 :value ,init-val
                 :choices ,choice-pairs
-                :validate ,validate)))
+                :validate ,validate
+                ,@change-prop)))
      (choice-pairs
       `((:preset :type choice :label ,(lispm-ui-tr "Choose")
                  :value ,(and (assoc init-val choice-pairs) init-val)
                  :choices ,choice-pairs
                  :on-change ,on-preset)
         (:value :type ,val-type :label ,title
-                :value ,init-val :submit t :validate ,validate)))
+                :value ,init-val :submit t :validate ,validate ,@change-prop)))
      (t
       `((:value :type ,val-type :label ,title
-                :value ,init-val :submit t :validate ,validate))))))
+                :value ,init-val :submit t :validate ,validate ,@change-prop))))))
 
 (defun lispm-ui-form--setup-modal-keymap ()
   "Bind `keyboard-quit' and `ESC' to `lispm-ui-form-cancel' in a local keymap copy."
@@ -434,8 +435,49 @@ REQUIRE-MATCH VALIDATE).")
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(cl-defun lispm-ui-form-modal (title fields &key values submit cancel intro setup)
+  "Open a modal `lispm-ui-form' of TITLE and FIELDS; return submitted values.
+VALUES, SUBMIT, CANCEL, INTRO and SETUP are as `lispm-ui-form' takes
+them.  Cancelling or closing the buffer signals `quit'."
+  (if lispm-ui-form-modal-function
+      (funcall lispm-ui-form-modal-function title fields
+               :values values :submit submit :cancel cancel
+               :intro intro :setup setup)
+    (let* ((submitted nil)
+           (closing nil)
+           (result nil)
+           (buffer nil)
+           (depth (recursion-depth))
+           (exit-with (lambda (ok &optional vals)
+                        (when (<= (recursion-depth) (1+ depth))
+                          (setq closing t
+                                submitted ok
+                                result vals)
+                          (when (= (recursion-depth) (1+ depth))
+                            (exit-recursive-edit))))))
+      (setq buffer
+            (lispm-ui-form
+             title fields
+             :values values :submit submit :cancel cancel :intro intro :modal t
+             :on-submit (lambda (vals) (funcall exit-with t vals))
+             :on-cancel (apply-partially exit-with nil)
+             :setup (lambda ()
+                      (lispm-ui-form--setup-modal-keymap)
+                      (when setup (funcall setup)))))
+      (with-current-buffer buffer
+        (add-hook 'kill-buffer-hook
+                  (lambda () (unless closing (funcall exit-with nil)))
+                  nil t))
+      (unwind-protect
+          (lispm-ui-form--run-modal-buffer buffer)
+        (setq closing t))
+      (unless submitted
+        (signal 'quit nil))
+      result)))
+
 (cl-defun lispm-ui-form-prompt (prompt &key initial default password choices
-                                       require-match validate choose-directory)
+                                       require-match validate choose-directory
+                                       on-change)
   "Ask PROMPT in a modal `lispm-ui-form' dialog and return the string entered.
 INITIAL is the initial text in the field; DEFAULT is returned when the
 field is submitted empty.  PASSWORD masks the input as stars.  CHOICES,
@@ -443,12 +485,15 @@ a list of strings, offers a pop-up menu of presets above the field (or
 alone when REQUIRE-MATCH is non-nil).  VALIDATE, a function of the
 value returning an error string or nil, checks the value before
 submitting.  When CHOOSE-DIRECTORY is non-nil, include a `Choose…'
-button that opens `lispm-ui-choose-file' for a folder.  Cancelling
+button that opens `lispm-ui-choose-file' for a folder.  ON-CHANGE, if
+non-nil, is called with the field's value as it changes.  Cancelling
 signals `quit'."
   (if lispm-ui-form-prompt-function
-      (funcall lispm-ui-form-prompt-function prompt
-               :initial initial :default default :password password
-               :choices choices :require-match require-match :validate validate)
+      (apply lispm-ui-form-prompt-function prompt
+             `(:initial ,initial :default ,default :password ,password
+               :choices ,choices :require-match ,require-match :validate ,validate
+               ,@(when choose-directory `(:choose-directory ,choose-directory))
+               ,@(when on-change `(:on-change ,on-change))))
     (let* ((clean (replace-regexp-in-string "[ \t]*:?[ \t]*\\'" "" (or prompt "")))
            (title (if (string-empty-p clean) (lispm-ui-tr "Choose") clean))
            (base-dir (file-name-as-directory (expand-file-name default-directory)))
@@ -475,14 +520,16 @@ signals `quit'."
            (on-preset (lambda (val)
                         (when (and val (buffer-live-p buffer))
                           (with-current-buffer buffer
-                            (lispm-ui-form-set :value val)))))
+                            (lispm-ui-form-set :value val))
+                          (when on-change
+                            (funcall on-change val)))))
            (browse-buttons
             (when choose-directory
               (lispm-ui-form--prompt-browse-buttons
                title init-val base-dir choice-pairs (lambda () buffer))))
            (fields (lispm-ui-form--prompt-fields
                     title init-val password choice-pairs require-match
-                    validate choose-directory browse-buttons on-preset)))
+                    validate choose-directory browse-buttons on-preset on-change)))
       (setq buffer
             (lispm-ui-form
              title fields
@@ -504,6 +551,61 @@ signals `quit'."
       (unless submitted
         (signal 'quit nil))
       result)))
+
+(cl-defun lispm-ui-save-file-default (&key title directory name)
+  "Ask in a modal form where to save a file; return the path, or nil.
+TITLE titles the dialog, DIRECTORY is the initial folder, and NAME is
+the initial file name.  Falls back to the minibuffer when popups cannot
+be shown."
+  (if (not (or lispm-ui-form-modal-function (lispm-ui-popup-available-p)))
+      (lispm-ui--save-file-in-minibuffer
+       (or title (lispm-ui-tr "Save File")) directory name)
+    (let* ((base-dir (file-name-as-directory
+                      (expand-file-name (or directory default-directory))))
+           (dialog-title (or title (lispm-ui-tr "Save File")))
+           (form-buffer nil)
+           (browse-buttons
+            `((,(lispm-ui-tr "Choose…") .
+               ,(lambda ()
+                  (when (buffer-live-p form-buffer)
+                    (let* ((cur (with-current-buffer form-buffer
+                                  (lispm-ui-form-value :directory)))
+                           (start (if (and (stringp cur)
+                                           (not (string-empty-p (string-trim cur))))
+                                      (expand-file-name (string-trim cur) base-dir)
+                                    base-dir))
+                           (chosen (lispm-ui-form--prompt-choose-dir
+                                    dialog-title start)))
+                      (when (and chosen (buffer-live-p form-buffer))
+                        (with-current-buffer form-buffer
+                          (lispm-ui-form-set
+                           :directory
+                           (abbreviate-file-name
+                            (file-name-as-directory
+                             (expand-file-name chosen base-dir))))))))))))
+           (fields
+            `((:name :type text :label ,(lispm-ui-tr "Save As")
+                     :value ,(or name "") :required t :submit t)
+              (:directory :type text :label ,(lispm-ui-tr "Where")
+                          :value ,(abbreviate-file-name base-dir)
+                          :validate ,(lambda (val)
+                                       (let ((dir (and (stringp val)
+                                                       (not (string-empty-p (string-trim val)))
+                                                       (expand-file-name (string-trim val) base-dir))))
+                                         (unless (and dir (file-directory-p dir))
+                                           (lispm-ui-tr "%s: fill this in"
+                                                        (lispm-ui-tr "Where"))))))
+              (:browse :type buttons :buttons ,browse-buttons)))
+           (values (condition-case nil
+                       (lispm-ui-form-modal
+                        dialog-title fields
+                        :submit (lispm-ui-tr "Save")
+                        :setup (lambda () (setq form-buffer (current-buffer))))
+                     (quit nil))))
+      (when values
+        (let* ((dir (expand-file-name (or (alist-get :directory values) base-dir) base-dir))
+               (file-name (alist-get :name values)))
+          (expand-file-name file-name (file-name-as-directory dir)))))))
 
 (provide 'lispm-ui-form-dress)
 ;;; lispm-ui-form-dress.el ends here

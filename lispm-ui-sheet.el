@@ -32,14 +32,51 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'button)
+(require 'svg)
 (require 'lispm-ui-base)
 (require 'lispm-ui-palette)
+(require 'lispm-ui-tokens)
 (require 'lispm-ui-text)
 (require 'lispm-ui-draw)
 (require 'lispm-ui-tabs)
 (require 'lispm-ui-controls)
-(require 'lispm-ui-scene-sprites)
-(require 'lispm-ui-scene)
+
+(defvar lispm-ui-sheet-status-info-function nil
+  "Optional hook resolving arbitrary STATUS values to chip metadata plists.
+When non-nil, called with STATUS and expected to return a plist with keys
+`:state', `:chip-label', `:accent-key', and `:accent-color'.")
+
+(defvar lispm-ui-sheet-portrait-draw-function nil
+  "Optional hook drawing portraits onto a property-sheet SVG canvas.
+When non-nil, called with `(SVG NODE X Y SIZE)' and returns non-nil when drawn.")
+
+(defun lispm-ui-sheet--default-status-info (status)
+  "Resolve generic STATUS string/symbol/plist into semantic chip metadata."
+  (let* ((raw-state (if (listp status) (plist-get status :state) status))
+         (state (or raw-state 'ready))
+         (label (or (and (listp status) (plist-get status :label))
+                    (capitalize (replace-regexp-in-string
+                                 "[-_]+" " "
+                                 (if (symbolp state) (symbol-name state) (format "%s" state))))))
+         (token-key (pcase state
+                      ((or 'working 'running 'active 'busy) :accent)
+                      ((or 'ok 'done 'success 'ready) :success-fg)
+                      ((or 'warning 'waiting 'blocked 'paused) :warning-fg)
+                      ((or 'error 'failed 'stopped 'danger) :danger-fg)
+                      (_ :muted))))
+    (list :state state :chip-label label :accent-key token-key)))
+
+(defun lispm-ui-sheet--draw-default-portrait (svg node x y size)
+  "Draw fallback initials circle on SVG for NODE at X, Y with diameter SIZE."
+  (let* ((name (or (plist-get node :name) (plist-get node :id) "?"))
+         (init (upcase (substring name 0 (min 2 (length name)))))
+         (r (/ size 2.0))
+         (bg (or (lispm-ui-color :accent) "#2563eb"))
+         (fg (lispm-ui-wcag-legible bg "#ffffff" "#000000")))
+    (svg-circle svg (+ x r) (+ y r) (max 2 (- r 1)) :fill bg)
+    (lispm-ui-svg-content svg init (+ x (/ (- size (lispm-ui-text-width init 'lispm-ui-small)) 2))
+                          (+ y 1) (- size 2) fg 'lispm-ui-small)
+    t))
 
 ;;;; Button flow cursor
 
@@ -105,21 +142,27 @@
   (unless lispm-ui-current-palette
     (lispm-ui-palette-follow-theme))
   (let* ((palette lispm-ui-current-palette)
-         (chrome (plist-get palette :chrome))
-         (info (lispm-ui-scene-state-info status))
-         (accent (or (and (plist-get info :accent-key)
-                          (plist-get palette (plist-get info :accent-key)))
+         (chrome (or (plist-get palette :chrome) (lispm-ui-color :chrome) "#e4e4e7"))
+         (info (funcall (or lispm-ui-sheet-status-info-function
+                            #'lispm-ui-sheet--default-status-info)
+                        status))
+         (accent (or (and palette (plist-get info :accent-key)
+                          (lispm-ui-token (plist-get info :accent-key) palette))
                      (plist-get info :accent-color)
-                     (plist-get palette :muted)))
-         (ground (or (lispm-ui-blend chrome accent 0.17) chrome))
-         (ink (lispm-ui-legible ground
-                                (plist-get palette :text)
-                                (plist-get palette :light)
-                                (plist-get palette :outline))))
+                     (plist-get palette :muted)
+                     "#71717a"))
+         (ground (or (and chrome accent (lispm-ui-blend chrome accent 0.17))
+                     chrome))
+         (ink (or (lispm-ui-legible ground
+                                    (or (plist-get palette :text) "#111111")
+                                    (or (plist-get palette :light) "#ffffff")
+                                    (or (plist-get palette :outline) "#3f3f46"))
+                  "#111111"))
+         (box-color (or (and palette (lispm-ui-grey palette #xA0)) "#a1a1aa")))
     (propertize (concat " " (plist-get info :chip-label) " ")
                 'face `(:inherit lispm-ui-small :foreground ,ink
                         :background ,ground
-                        :box (:line-width 1 :color ,(lispm-ui-grey palette #xA0)))
+                        :box (:line-width 1 :color ,box-color))
                 'lispm-ui-sheet-status (plist-get info :state))))
 
 (defun lispm-ui-sheet-portrait-image (node &optional size)
@@ -129,8 +172,7 @@
   (let* ((size (or size 32))
          (palette lispm-ui-current-palette)
          (svg (svg-create size size))
-         (inside (- size 8))
-         (avatar (plist-get node :avatar)))
+         (inside (- size 8)))
     (lispm-ui-svg-fill svg 0 0 size size (plist-get palette :chrome))
     (lispm-ui-svg-edges svg 0 0 size size
                         (list (lispm-ui-grey palette #xFF))
@@ -140,9 +182,9 @@
     (lispm-ui-svg-edges svg 2 2 (- size 4) (- size 4)
                         (list (lispm-ui-grey palette #x88))
                         (list (lispm-ui-grey palette #xFF)))
-    (unless (lispm-ui-scene-draw-avatar svg avatar 4 4 inside)
-      (lispm-ui-scene-draw-pixel-portrait
-       svg (lispm-ui-scene-portrait-for-node node) 4 4 (/ inside 16.0)))
+    (unless (and lispm-ui-sheet-portrait-draw-function
+                 (funcall lispm-ui-sheet-portrait-draw-function svg node 4 4 inside))
+      (lispm-ui-sheet--draw-default-portrait svg node 4 4 inside))
     (lispm-ui-svg-image svg)))
 
 (defun lispm-ui-sheet-header (name identity status activity width)

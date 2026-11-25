@@ -80,7 +80,7 @@ steps out, which is softened there.  The right side is the mirror.")
         (row 0 (1- w) (+ h 1) between)
         (row 0 (1- w) (+ h 2) (funcall grey #xFF))))))
 
-(cl-defgeneric lispm-ui-draw-tab (palette label width &key front face)
+(cl-defgeneric lispm-ui-draw-tab (palette label width &key front face close focused)
   "Return an SVG of a tab WIDTH pixels wide reading LABEL, in PALETTE.
 Tabs are trapezoids, their sides slanting out a pixel every three rows
 from top corners rounded off, and stand on the edge of the pane they
@@ -89,7 +89,8 @@ three rows more for that edge.  The tab in FRONT is the pane's colour
 and opens into it; a tab behind is darker, lit along its top and left,
 and the pane's outline runs under it.  LABEL is a string as Emacs would
 show it in FACE, by default the system font's, its icons included; every
-label is black, none heavier than the others."
+label is black, none heavier than the others.
+Optional CLOSE draws a close indicator; FOCUSED draws a focus ring."
   (let* ((face (or face 'lispm-ui-title))
          (h lispm-ui-tab-height)
          (w width)
@@ -130,9 +131,15 @@ label is black, none heavier than the others."
                 (when front (dot (- right 2) y shade-lit))))))
        lispm-ui--tab-slant))
     (lispm-ui--draw-tab-pane-edge svg w h front palette)
-    (lispm-ui-svg-content
-     svg label (/ (- w (lispm-ui-text-width label face)) 2) 0 h
-     (plist-get palette :text) face)
+    (let* ((room (if close (- w 16) w))
+           (tx (max 6 (/ (- room (lispm-ui-text-width label face)) 2))))
+      (lispm-ui-svg-content svg label tx 0 h (plist-get palette :text) face))
+    (when close
+      (lispm-ui-svg-content svg "×" (- w 15) 0 h (plist-get palette :muted) 'lispm-ui-small))
+    (when focused
+      (svg-rectangle svg 1 1 (- w 2) (- h 2) :fill "none"
+                     :stroke (or (plist-get palette :focus) "#2563eb")
+                     :stroke-width 1.5))
     svg))
 
 (cl-defgeneric lispm-ui-draw-tab-edge (palette width)
@@ -255,6 +262,81 @@ WIDTH must allow at least one tab border (4 cells or 36 pixels)."
                  (if tty (lispm-ui--text-tabs row width)
                    (lispm-ui--image-tabs row width face)))
                (seq-partition tabs count) "\n")))
+
+(defun lispm-ui-tabs--spec-parts (spec)
+  "Return `(KEY LABEL CLOSABLE)' normalized from tab SPEC."
+  (if (and (listp spec) (keywordp (car spec)))
+      (list (plist-get spec :key) (plist-get spec :label) (plist-get spec :closable))
+    (list (car spec) (cdr spec) nil)))
+
+(defun lispm-ui-tabs--insert-one (spec active keys idx on-select on-close face)
+  "Insert one interactive tab from SPEC at IDX with arrow/close bindings."
+  (pcase-let* ((`(,key ,label ,closable) (lispm-ui-tabs--spec-parts spec))
+               (front (equal key active))
+               (close-p (and on-close closable))
+               (prev (nth (mod (1- idx) (length keys)) keys))
+               (next (nth (mod (1+ idx) (length keys)) keys))
+               (map (let ((m (make-sparse-keymap)))
+                      (keymap-set m "<left>" (lambda () (interactive)
+                                               (when on-select (funcall on-select prev))))
+                      (keymap-set m "<right>" (lambda () (interactive)
+                                                (when on-select (funcall on-select next))))
+                      (keymap-set m "RET" (lambda () (interactive)
+                                            (when on-select (funcall on-select key))))
+                      (keymap-set m "SPC" (lambda () (interactive)
+                                            (when on-select (funcall on-select key))))
+                      (keymap-set m "<down-mouse-1>"
+                                  (lambda (_e) (interactive "e")
+                                    (when on-select (funcall on-select key))))
+                      (keymap-set m "<mouse-1>" #'ignore)
+                      (when close-p
+                        (keymap-set m "C-w" (lambda () (interactive) (funcall on-close key)))
+                        (keymap-set m "d" (lambda () (interactive) (funcall on-close key))))
+                      m))
+               (f (or face 'lispm-ui-title))
+               (body
+                (if (lispm-ui-tty-p)
+                    (propertize (concat " " label " ")
+                                'face (if front 'tab-line-tab-current 'tab-line-tab))
+                  (let* ((w (+ (* 2 lispm-ui-tab-padding)
+                               (lispm-ui-text-width label f)
+                               (if close-p 14 0)))
+                         (plain (lispm-ui-look-image
+                                 (list 'tabs-int (lispm-ui-content-key label) front close-p w f)
+                                 (lambda ()
+                                   (lispm-ui-draw-tab lispm-ui-current-palette label w
+                                                      :front front :face f :close close-p))))
+                         (foc (lispm-ui-look-image
+                               (list 'tabs-int-f (lispm-ui-content-key label) front close-p w f)
+                               (lambda ()
+                                 (lispm-ui-draw-tab lispm-ui-current-palette label w
+                                                    :front front :face f
+                                                    :close close-p :focused t)))))
+                    (propertize " " 'display plain
+                                'lispm-ui-plain plain 'lispm-ui-focused foc)))))
+    (insert (propertize body 'keymap map 'pointer 'hand 'lispm-ui-focusable t
+                        'lispm-ui-tab-key key 'lispm-ui-label label))
+    (when (and close-p (lispm-ui-tty-p))
+      (let ((cmap (let ((m (make-sparse-keymap)))
+                    (keymap-set m "RET" (lambda () (interactive) (funcall on-close key)))
+                    (keymap-set m "<down-mouse-1>"
+                                (lambda (_e) (interactive "e") (funcall on-close key)))
+                    (keymap-set m "<mouse-1>" #'ignore)
+                    m)))
+        (insert (propertize "×" 'keymap cmap 'face 'shadow 'pointer 'hand
+                            'lispm-ui-tab-close key))))))
+
+(cl-defun lispm-ui-insert-tabs (specs active on-select &key width on-close face)
+  "Insert interactive tabs from SPECS, selecting ACTIVE via ON-SELECT.
+SPECS entries are `(KEY . LABEL)' or `(:key K :label L :closable BOOL)'.
+Bind Left/Right arrows to switch tabs and optional ON-CLOSE for closeable tabs."
+  (ignore width)
+  (let ((keys (mapcar (lambda (s) (car (lispm-ui-tabs--spec-parts s))) specs)))
+    (cl-loop for spec in specs for idx from 0 do
+             (when (> idx 0)
+               (insert (propertize " " 'face 'default)))
+             (lispm-ui-tabs--insert-one spec active keys idx on-select on-close face))
+    (insert "\n")))
 
 (provide 'lispm-ui-tabs)
 ;;; lispm-ui-tabs.el ends here

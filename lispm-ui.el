@@ -78,6 +78,20 @@
 ;;                      its controls: push buttons, pop-up menus, bevel
 ;;                      buttons, radio buttons, check boxes and group
 ;;                      boxes, drawn, as strings and in buffers
+;;   lispm-ui-controls-extra.el
+;;                      semantic buttons, switch, slider, stepper,
+;;                      segmented control, and tristate checkbox
+;;   lispm-ui-input.el  embeddable interactive input, combobox, and tags
+;;   lispm-ui-feedback.el
+;;                      progress, spinner, skeleton, badge, avatar,
+;;                      empty state, banner, and toast notifications
+;;   lispm-ui-overlay.el
+;;                      anchored popovers, async dialogs, side drawers,
+;;                      and command palette
+;;   lispm-ui-data.el   virtualized list view, sortable data table,
+;;                      collapsible tree view, accordion, and kv pairs
+;;   lispm-ui-rich.el   pagination, breadcrumb, wizard stepper, markdown,
+;;                      and unified/inline diff views
 ;;   lispm-ui-list.el   lists' column headings and disclosure triangles
 ;;   lispm-ui-scroll.el scroll bars, drawn
 ;;   lispm-ui-window.el windows' title bars, as dialogs draw them
@@ -126,12 +140,18 @@
 (require 'lispm-ui-ask)
 (require 'lispm-ui-tabs)
 (require 'lispm-ui-controls)
+(require 'lispm-ui-controls-extra)
 (require 'lispm-ui-view)
 (require 'lispm-ui-layout)
+(require 'lispm-ui-input)
+(require 'lispm-ui-feedback)
+(require 'lispm-ui-data)
+(require 'lispm-ui-rich)
 (require 'lispm-ui-list)
 (require 'lispm-ui-scroll)
 (require 'lispm-ui-window)
 (require 'lispm-ui-popup)
+(require 'lispm-ui-overlay)
 (require 'lispm-ui-field)
 (require 'lispm-ui-alert)
 (require 'lispm-ui-menu)

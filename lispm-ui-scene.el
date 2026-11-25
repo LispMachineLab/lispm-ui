@@ -702,5 +702,18 @@ Lines carry KEY-PROP (default `lispm-ui-scene-key') and ROOM-PROP
                      key-prop key room-prop (plist-get item :id))))))
       (insert "\n"))))
 
+(defun lispm-ui-scene--sheet-portrait-draw (svg node x y size)
+  "Render NODE's avatar or pixel portrait on SVG at X, Y with diameter SIZE."
+  (unless (lispm-ui-scene-draw-avatar svg (plist-get node :avatar) x y size)
+    (lispm-ui-scene-draw-pixel-portrait
+     svg (lispm-ui-scene-portrait-for-node node) x y (/ size 16.0)))
+  t)
+
+(with-eval-after-load 'lispm-ui-sheet
+  (unless lispm-ui-sheet-status-info-function
+    (setq lispm-ui-sheet-status-info-function #'lispm-ui-scene-state-info))
+  (unless lispm-ui-sheet-portrait-draw-function
+    (setq lispm-ui-sheet-portrait-draw-function #'lispm-ui-scene--sheet-portrait-draw)))
+
 (provide 'lispm-ui-scene)
 ;;; lispm-ui-scene.el ends here

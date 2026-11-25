@@ -245,7 +245,10 @@ it; it is drawn from its own drawing of that size or twice it, see
           (when (> (hash-table-count lispm-ui--icons) 512)
             (clrhash lispm-ui--icons))
           (puthash ckey
-                   (create-image svg 'svg t :width sz :height sz :ascent 'center)
+                   (if (image-type-available-p 'svg)
+                       (create-image svg 'svg t :width sz :height sz :ascent 'center)
+                     (list 'image :type 'svg :data svg :width sz :height sz
+                           :ascent 'center :scale 1))
                    lispm-ui--icons)))))
 
 (cl-defun lispm-ui-icon (name &key size tint)

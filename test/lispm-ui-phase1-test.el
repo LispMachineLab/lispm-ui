@@ -103,7 +103,11 @@
                     ((symbol-function 'display-images-p) (lambda (&rest _) t)))
             (let ((img-str (lispm-ui-icon 'search :size 20 :tint "#334455")))
               (should (eq (car (get-text-property 0 'display img-str)) 'image))
-              (should (= (plist-get (cdr (get-text-property 0 'display img-str)) :width) 20)))))
+              (should (= (plist-get (cdr (get-text-property 0 'display img-str)) :width) 20)))
+            (cl-letf (((symbol-function 'image-type-available-p) #'ignore))
+              (let ((img-str (lispm-ui-icon 'search :size 18 :tint "#445566")))
+                (should (eq (car (get-text-property 0 'display img-str)) 'image))
+                (should (= (plist-get (cdr (get-text-property 0 'display img-str)) :width) 18))))))
       (lispm-ui-icon-unregister 'p1-custom)
       (should-not (lispm-ui-icon-p 'p1-custom)))))
 

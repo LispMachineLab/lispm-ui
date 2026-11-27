@@ -189,10 +189,22 @@
      :tty "◧"))
   "Built-in catalog of 52 16x16 stroke-based UI icons with TTY fallbacks.")
 
+(defconst lispm-ui-icons--catalog-source lispm-ui-icons-catalog
+  "Identity marker for `lispm-ui-icons--catalog-table'.")
+
+(defconst lispm-ui-icons--catalog-table
+  (let ((table (make-hash-table :test #'equal :size (length lispm-ui-icons-catalog))))
+    (dolist (entry lispm-ui-icons-catalog)
+      (puthash (car entry) (cdr entry) table))
+    table)
+  "Hash table indexing `lispm-ui-icons-catalog' by icon name string.")
+
 (defun lispm-ui-icons-catalog-entry (name)
   "Return catalog entry plist for icon NAME, or nil."
   (let ((key (if (symbolp name) (symbol-name name) name)))
-    (cdr (assoc key lispm-ui-icons-catalog))))
+    (if (eq lispm-ui-icons-catalog lispm-ui-icons--catalog-source)
+        (gethash key lispm-ui-icons--catalog-table)
+      (cdr (assoc key lispm-ui-icons-catalog)))))
 
 (provide 'lispm-ui-icons-catalog)
 ;;; lispm-ui-icons-catalog.el ends here

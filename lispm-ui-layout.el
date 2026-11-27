@@ -178,13 +178,13 @@ Elements eq to `flex' / `:spacer' expand evenly when WIDTH is provided."
       (let* ((tag (propertize (concat " " label " ") 'face 'lispm-ui-caption))
              (lw (lispm-ui-text-width tag))
              (side (max 8 (/ (- w lw) 2)))
-             (img (lispm-ui-look-image
+             (img (lispm-ui-look-sized-image
                    (list 'divider-h side rule-color)
                    (lambda () (lispm-ui-layout--draw-divider side rule-color)))))
         (concat (propertize " " 'display img) tag (propertize " " 'display img))))
      (t
       (propertize " " 'display
-                  (lispm-ui-look-image
+                  (lispm-ui-look-sized-image
                    (list 'divider-h w rule-color)
                    (lambda () (lispm-ui-layout--draw-divider w rule-color))))))))
 
@@ -425,7 +425,7 @@ Look-styled toolbar image via `lispm-ui-draw-toolbar'."
     (if (and (not tty) lispm-ui-current-palette
              (null left) (null right) (null center))
         (propertize " " 'display
-                    (lispm-ui-look-image
+                    (lispm-ui-look-sized-image
                      (list 'toolbar total label height)
                      (lambda ()
                        (lispm-ui-draw-toolbar lispm-ui-current-palette total label height))))
@@ -446,7 +446,7 @@ Look-styled toolbar image via `lispm-ui-draw-toolbar'."
     (if (and (not tty) lispm-ui-current-palette
              (null left) (null right) (null center))
         (propertize " " 'display
-                    (lispm-ui-look-image
+                    (lispm-ui-look-sized-image
                      (list 'footer-bar total label height)
                      (lambda ()
                        (lispm-ui-draw-footer-bar lispm-ui-current-palette total label height))))

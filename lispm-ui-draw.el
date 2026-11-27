@@ -44,8 +44,26 @@
 
 ;;;; Images
 
+(defvar lispm-ui-image-cache-limit 512
+  "Maximum number of entries kept in `lispm-ui--images'.")
+
+(defvar lispm-ui-sized-image-cache-limit 128
+  "Maximum number of entries kept in `lispm-ui--sized-images'.")
+
 (defvar lispm-ui--images (make-hash-table :test #'equal)
   "Drawn images by key: what was drawn, its size and the palette generation.")
+
+(defvar lispm-ui--sized-images (make-hash-table :test #'equal)
+  "Resize-varying drawn images kept apart from `lispm-ui--images'.")
+
+(defvar lispm-ui--image-clock 0
+  "Monotonic access counter for LRU eviction in image caches.")
+
+(defvar lispm-ui--images-lru (make-hash-table :test #'equal)
+  "Last-access clock ticks for entries in `lispm-ui--images'.")
+
+(defvar lispm-ui--sized-images-lru (make-hash-table :test #'equal)
+  "Last-access clock ticks for entries in `lispm-ui--sized-images'.")
 
 (defun lispm-ui-svg-image (svg)
   "Return the image of SVG, svg.el's or SVG text, centred on its line and
@@ -58,13 +76,19 @@ which it cannot show: the text under it shows instead, where
         ((stringp svg) (create-image svg 'svg t :ascent 'center :scale 1))
         (t (svg-image svg :ascent 'center :scale 1))))
 
-(defun lispm-ui-image--evict-stale (&optional generation)
-  "Evict cached images from older palette generations than GENERATION."
+(defun lispm-ui--evict-stale-from (table lru-table &optional generation)
+  "Evict entries in TABLE and LRU-TABLE older than palette GENERATION."
   (let ((gen (or generation lispm-ui-palette-generation)))
     (maphash (lambda (k _v)
                (when (and (consp k) (integerp (car k)) (not (eql (car k) gen)))
-                 (remhash k lispm-ui--images)))
-             lispm-ui--images)))
+                 (remhash k table)
+                 (remhash k lru-table)))
+             table)))
+
+(defun lispm-ui-image--evict-stale (&optional generation)
+  "Evict cached images from older palette generations than GENERATION."
+  (lispm-ui--evict-stale-from lispm-ui--images lispm-ui--images-lru generation)
+  (lispm-ui--evict-stale-from lispm-ui--sized-images lispm-ui--sized-images-lru generation))
 
 (defvar lispm-ui-image--evict-effect nil
   "Active `lispm-ui-effect' evicting stale-generation images.")
@@ -74,21 +98,66 @@ which it cannot show: the text under it shows instead, where
 (setq lispm-ui-image--evict-effect
       (lispm-ui-effect lispm-ui-palette-generation-signal #'lispm-ui-image--evict-stale))
 
+(defun lispm-ui--cache-evict-lru (table lru-table limit)
+  "Evict stale or oldest entries from TABLE and LRU-TABLE above LIMIT."
+  (when (>= (hash-table-count table) limit)
+    (lispm-ui--evict-stale-from table lru-table)
+    (let ((count (hash-table-count table)))
+      (when (>= count limit)
+        (let ((entries nil)
+              (drop (max (- count (/ limit 2)) (/ count 2))))
+          (maphash (lambda (k _v)
+                     (push (cons (gethash k lru-table 0) k) entries))
+                   table)
+          (setq entries (sort entries (lambda (a b) (< (car a) (car b)))))
+          (dotimes (_ drop)
+            (when entries
+              (let ((k (cdr (pop entries))))
+                (remhash k table)
+                (remhash k lru-table)))))))
+    (when (> (hash-table-count lru-table) (* 2 limit))
+      (maphash (lambda (k _v)
+                 (when (eq (gethash k table :lispm-ui-miss) :lispm-ui-miss)
+                   (remhash k lru-table)))
+               lru-table))))
+
+(defun lispm-ui--cached-image (table lru-table limit key draw)
+  "Return cached image for KEY from TABLE using LRU-TABLE and LIMIT, via DRAW."
+  (let* ((full-key (cons lispm-ui-palette-generation key))
+         (hit (gethash full-key table)))
+    (if hit
+        (progn
+          (setq lispm-ui--image-clock (1+ lispm-ui--image-clock))
+          (puthash full-key lispm-ui--image-clock lru-table)
+          hit)
+      (lispm-ui--cache-evict-lru table lru-table limit)
+      (let ((image (lispm-ui-svg-image (funcall draw))))
+        (setq lispm-ui--image-clock (1+ lispm-ui--image-clock))
+        (puthash full-key lispm-ui--image-clock lru-table)
+        (puthash full-key image table)))))
+
 (defun lispm-ui-image (key draw)
   "Return the image of KEY, calling DRAW to make its SVG the first time,
 an SVG of svg.el's or SVG text.  It is made again in a new palette."
-  (let ((key (cons lispm-ui-palette-generation key)))
-    (or (gethash key lispm-ui--images)
-        (progn
-          (when (> (hash-table-count lispm-ui--images) 512)
-            (clrhash lispm-ui--images))
-          (puthash key (lispm-ui-svg-image (funcall draw))
-                   lispm-ui--images)))))
+  (lispm-ui--cached-image lispm-ui--images lispm-ui--images-lru
+                          lispm-ui-image-cache-limit key draw))
 
 (defun lispm-ui-look-image (key draw)
   "Return the image of KEY drawn by DRAW, kept apart for the look in use,
 see `lispm-ui-image'."
   (lispm-ui-image (cons lispm-ui-look key) draw))
+
+(defun lispm-ui-sized-image (key draw)
+  "Return cached resize-varying image for KEY, built via DRAW when absent.
+Kept apart from `lispm-ui--images' so continuous window or chrome
+resizing never evicts stable icons and controls."
+  (lispm-ui--cached-image lispm-ui--sized-images lispm-ui--sized-images-lru
+                          lispm-ui-sized-image-cache-limit key draw))
+
+(defun lispm-ui-look-sized-image (key draw)
+  "Return resize-varying image of KEY drawn by DRAW for the look in use.
+See `lispm-ui-sized-image'."
+  (lispm-ui-sized-image (cons lispm-ui-look key) draw))
 
 ;;;; Pixels
 

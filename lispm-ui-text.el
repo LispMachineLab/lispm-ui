@@ -60,13 +60,54 @@ Assumes HOLDS is monotonic: true at LOW and false above the threshold."
         (setq high (1- middle)))))
   low)
 
+(defvar lispm-ui-text--width-cache (make-hash-table :test #'equal)
+  "Bounded memoization cache for `lispm-ui-text-width'.")
+
+(defun lispm-ui-text-width-clear-cache ()
+  "Clear `lispm-ui-text--width-cache'."
+  (clrhash lispm-ui-text--width-cache))
+
+(defun lispm-ui-text--evict-width-cache ()
+  "Evict half of `lispm-ui-text--width-cache' when it reaches capacity."
+  (when (>= (hash-table-count lispm-ui-text--width-cache) 512)
+    (let ((drop (/ (hash-table-count lispm-ui-text--width-cache) 2))
+          (victims nil))
+      (maphash (lambda (k _v)
+                 (when (> drop 0)
+                   (push k victims)
+                   (setq drop (1- drop))))
+               lispm-ui-text--width-cache)
+      (dolist (k victims)
+        (remhash k lispm-ui-text--width-cache)))))
+
 (defun lispm-ui-text-width (text &optional face)
   "Return the width in pixels of TEXT shown in its faces, FACE beneath them.
 On a text terminal, in cells."
-  (let ((text (copy-sequence text)))
-    (when face
-      (add-face-text-property 0 (length text) face t text))
-    (string-pixel-width text)))
+  (if (and (stringp text)
+           (<= (length text) 128)
+           (null (text-properties-at 0 text))
+           (null (next-property-change 0 text))
+           (zerop (or (bound-and-true-p text-scale-mode-amount) 0)))
+      (let* ((key (list text face (frame-terminal) (frame-parameter nil 'font)
+                        (bound-and-true-p lispm-ui-palette-generation)
+                        (bound-and-true-p lispm-ui-look)
+                        (and (symbolp face) (facep face)
+                             (face-attribute face :height nil t))
+                        (symbol-function 'string-pixel-width)))
+             (cached (gethash key lispm-ui-text--width-cache)))
+        (or cached
+            (let ((width (if face
+                             (let ((copy (copy-sequence text)))
+                               (add-face-text-property 0 (length copy) face t copy)
+                               (string-pixel-width copy))
+                           (string-pixel-width text))))
+              (lispm-ui-text--evict-width-cache)
+              (puthash key width lispm-ui-text--width-cache))))
+    (if face
+        (let ((text (copy-sequence text)))
+          (add-face-text-property 0 (length text) face t text)
+          (string-pixel-width text))
+      (string-pixel-width text))))
 
 (defun lispm-ui-text-fit (text pixels &optional face)
   "Return TEXT cut to PIXELS wide in its faces, FACE beneath them, ending in

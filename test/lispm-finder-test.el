@@ -317,5 +317,29 @@ and exposes public aliases and keybindings for external packages."
       (should (eq (plist-get delegated :preview) t))
       (should (equal (plist-get delegated :title) "Pick")))))
 
+(ert-deftest lispm-finder-test-fs-info-ttl-cache ()
+  "Verify `lispm-finder--info' caches `file-system-info' within `lispm-finder-fs-info-ttl'."
+  (let ((lispm-finder--fs-info-cache (make-hash-table :test #'equal))
+        (lispm-finder-fs-info-ttl 5.0)
+        (fs-calls 0)
+        (now 1000.0))
+    (cl-letf (((symbol-function 'float-time) (lambda (&optional _) now))
+              ((symbol-function 'file-system-info)
+               (lambda (_dir) (setq fs-calls (1+ fs-calls)) '(1000 500 500))))
+      (let ((lispm-finder--directory "/tmp/dir-a/")
+            (lispm-finder--items '(("one.el"))))
+        (should (string-match-p "500" (lispm-finder--info)))
+        (should (string-match-p "500" (lispm-finder--info)))
+        (should (= fs-calls 1))
+        ;; Advancing past TTL triggers a fresh query.
+        (setq now (+ now 10.0))
+        (should (string-match-p "500" (lispm-finder--info)))
+        (should (= fs-calls 2)))
+      ;; Different directory does not hit dir-a's cached entry.
+      (let ((lispm-finder--directory "/tmp/dir-b/")
+            (lispm-finder--items '(("two.el"))))
+        (lispm-finder--info)
+        (should (= fs-calls 3))))))
+
 (provide 'lispm-finder-test)
 ;;; lispm-finder-test.el ends here

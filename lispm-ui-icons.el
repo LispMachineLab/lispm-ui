@@ -45,6 +45,9 @@
 (require 'lispm-ui-icons-catalog)
 (require 'lispm-ui-raster)
 
+(defvar lispm-ui-icon-cache-limit 512
+  "Maximum number of entries kept in `lispm-ui--icons'.")
+
 (defvar lispm-ui--icons (make-hash-table :test #'equal)
   "Icon images by name or `(FILE-OR-NAME SIZE TINT)' key.")
 
@@ -66,9 +69,33 @@ does, adds one.")
   "Remove cached rendered icons matching KEY from `lispm-ui--icons'."
   (remhash key lispm-ui--icons)
   (maphash (lambda (k _v)
-             (when (and (consp k) (equal (car k) key))
+             (when (and (consp k)
+                        (or (equal (car k) key)
+                            (and (eq (car k) 'fast) (equal (cadr k) key))))
                (remhash k lispm-ui--icons)))
            lispm-ui--icons))
+
+(defun lispm-ui--evict-icons-half ()
+  "Evict stale or oldest-half entries from `lispm-ui--icons' when full."
+  (when (>= (hash-table-count lispm-ui--icons) lispm-ui-icon-cache-limit)
+    (let ((gen lispm-ui-palette-generation))
+      (maphash (lambda (k _v)
+                 (when (and (consp k) (eq (car k) 'fast)
+                            (let ((kgen (nth 9 k)))
+                              (and (integerp kgen) (not (eql kgen gen)))))
+                   (remhash k lispm-ui--icons)))
+               lispm-ui--icons))
+    (let ((count (hash-table-count lispm-ui--icons)))
+      (when (>= count lispm-ui-icon-cache-limit)
+        (let ((drop (/ count 2))
+              (victims nil))
+          (maphash (lambda (k _v)
+                     (when (> drop 0)
+                       (push k victims)
+                       (setq drop (1- drop))))
+                   lispm-ui--icons)
+          (dolist (k victims)
+            (remhash k lispm-ui--icons)))))))
 
 (cl-defun lispm-ui-icon-register (name &key file svg tty)
   "Register icon NAME with FILE path, raw SVG string, and/or TTY glyph.
@@ -242,8 +269,7 @@ it; it is drawn from its own drawing of that size or twice it, see
   (let ((ckey (list key sz color)))
     (or (gethash ckey lispm-ui--icons)
         (when-let* ((svg (funcall svg-fn)))
-          (when (> (hash-table-count lispm-ui--icons) 512)
-            (clrhash lispm-ui--icons))
+          (lispm-ui--evict-icons-half)
           (puthash ckey
                    (if (image-type-available-p 'svg)
                        (create-image svg 'svg t :width sz :height sz :ascent 'center)
@@ -256,48 +282,64 @@ it; it is drawn from its own drawing of that size or twice it, see
 NAME is resolved via the icon registry, bundled files, or built-in catalog.
 Optional SIZE (default 16) sets pixel dimensions; optional TINT colors
 vector SVG icons or TTY fallback glyphs."
-  (let* ((key (lispm-ui--icon-key name))
-         (sz (or size 16))
-         (reg (gethash key lispm-ui--icon-registry))
-         (cat (lispm-ui-icons-catalog-entry key))
-         (file (unless reg (lispm-ui-icon-file name))))
-    (cond
-     ((lispm-ui-tty-p) (lispm-ui-text-icon name tint))
-     ((not (display-images-p))
-      (propertize " " 'face 'lispm-ui-list 'display `(space :width (,sz))))
-     ((plist-get reg :svg)
-      (let ((color (lispm-ui--resolve-tint tint)))
-        (propertize " " 'face 'lispm-ui-list
-                    'display (lispm-ui--icon-cached-svg-image
-                              key sz color
-                              (lambda () (lispm-ui-icon-svg name :size sz :tint color))))))
-     ((and (plist-get reg :file) (file-readable-p (plist-get reg :file)))
-      (let* ((f (plist-get reg :file))
-             (ckey (list f sz nil)))
-        (propertize " " 'face 'lispm-ui-list
-                    'display (or (gethash ckey lispm-ui--icons)
-                                 (puthash ckey (create-image f nil nil :height sz :ascent 'center)
-                                          lispm-ui--icons)))))
-     ((and (or tint size) cat)
-      (let ((color (lispm-ui--resolve-tint tint)))
-        (propertize " " 'face 'lispm-ui-list
-                    'display (lispm-ui--icon-cached-svg-image
-                              key sz color
-                              (lambda () (lispm-ui-icon-svg name :size sz :tint color))))))
-     ((and file (file-readable-p file))
-      (let ((cache-key (if size (list file sz nil) file)))
-        (propertize " " 'face 'lispm-ui-list
-                    'display (or (gethash cache-key lispm-ui--icons)
-                                 (puthash cache-key (create-image file nil nil :height sz
-                                                                  :ascent 'center)
-                                          lispm-ui--icons)))))
-     (cat
-      (let ((color (lispm-ui--resolve-tint tint)))
-        (propertize " " 'face 'lispm-ui-list
-                    'display (lispm-ui--icon-cached-svg-image
-                              key sz color
-                              (lambda () (lispm-ui-icon-svg name :size sz :tint color))))))
-     (t (propertize " " 'face 'lispm-ui-list 'display `(space :width (,sz)))))))
+  (if (lispm-ui-tty-p)
+      (lispm-ui-text-icon name tint)
+    (let ((sz (or size 16)))
+      (if (not (display-images-p))
+          (propertize " " 'face 'lispm-ui-list 'display `(space :width (,sz)))
+        (let* ((key (lispm-ui--icon-key name))
+               (svg-p (and (image-type-available-p 'svg) t))
+               (fast-key (list 'fast key (eq name 'emacs) sz tint
+                               (and (null tint) (lispm-ui-color :text))
+                               (and (keywordp tint) (lispm-ui-token tint))
+                               lispm-ui-look
+                               lispm-ui-icon-functions
+                               lispm-ui-palette-generation
+                               svg-p)))
+          (if-let* ((cached (gethash fast-key lispm-ui--icons)))
+              (propertize " " 'face 'lispm-ui-list 'display cached)
+            (let* ((reg (gethash key lispm-ui--icon-registry))
+                   (cat (lispm-ui-icons-catalog-entry key))
+                   (file (unless reg (lispm-ui-icon-file name)))
+                   (display
+                    (cond
+                     ((plist-get reg :svg)
+                      (let ((color (lispm-ui--resolve-tint tint)))
+                        (lispm-ui--icon-cached-svg-image
+                         key sz color
+                         (lambda () (lispm-ui-icon-svg name :size sz :tint color)))))
+                     ((and (plist-get reg :file) (file-readable-p (plist-get reg :file)))
+                      (let* ((f (plist-get reg :file))
+                             (ckey (list f sz nil)))
+                        (or (gethash ckey lispm-ui--icons)
+                            (progn
+                              (lispm-ui--evict-icons-half)
+                              (puthash ckey (create-image f nil nil :height sz :ascent 'center)
+                                       lispm-ui--icons)))))
+                     ((and (or tint size) cat)
+                      (let ((color (lispm-ui--resolve-tint tint)))
+                        (lispm-ui--icon-cached-svg-image
+                         key sz color
+                         (lambda () (lispm-ui-icon-svg name :size sz :tint color)))))
+                     ((and file (file-readable-p file))
+                      (let ((cache-key (if size (list file sz nil) file)))
+                        (or (gethash cache-key lispm-ui--icons)
+                            (progn
+                              (lispm-ui--evict-icons-half)
+                              (puthash cache-key
+                                       (create-image file nil nil :height sz
+                                                     :ascent 'center)
+                                       lispm-ui--icons)))))
+                     (cat
+                      (let ((color (lispm-ui--resolve-tint tint)))
+                        (lispm-ui--icon-cached-svg-image
+                         key sz color
+                         (lambda () (lispm-ui-icon-svg name :size sz :tint color))))))))
+              (when display
+                (lispm-ui--evict-icons-half)
+                (puthash fast-key display lispm-ui--icons))
+              (propertize " " 'face 'lispm-ui-list
+                          'display (or display `(space :width (,sz)))))))))))
 
 ;;;; Files' icons
 

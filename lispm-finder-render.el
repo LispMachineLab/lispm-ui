@@ -188,7 +188,7 @@ pixel width of buttons after the strip."
                        (concat (make-string before ?\s) label (make-string cols ?\s)) cols)
                       'face 'lispm-finder-toolbar))
       (propertize " " 'display
-                  (lispm-ui-look-image
+                  (lispm-ui-look-sized-image
                    (list 'finder-header-strip label width left)
                    (lambda () (lispm-finder-draw-header-strip lispm-ui-current-palette
                                                               width label left)))))))
@@ -274,27 +274,52 @@ When TRAILING-PAD is non-nil, include trailing margin."
    svg t t))
 
 (defvar lispm-finder--icons (make-hash-table :test #'equal)
-  "Large icon images by (FILE . SELECTED).")
+  "Large icon images by (FILE . SELECTED) or fast-path key.")
+
+(defvar lispm-finder-icon-cache-limit 256
+  "Maximum number of entries kept in `lispm-finder--icons'.")
+
+(defun lispm-finder--evict-icons-half ()
+  "Evict half of `lispm-finder--icons' when it reaches capacity."
+  (let ((count (hash-table-count lispm-finder--icons)))
+    (when (>= count lispm-finder-icon-cache-limit)
+      (let ((drop (/ count 2))
+            (victims nil))
+        (maphash (lambda (k _v)
+                   (when (> drop 0)
+                     (push k victims)
+                     (setq drop (1- drop))))
+                 lispm-finder--icons)
+        (dolist (k victims)
+          (remhash k lispm-finder--icons))))))
 
 (defun lispm-finder--icon (name selected)
   "Return the large icon NAME as a string showing it, darkened when SELECTED."
-  (let ((file (or (and name (lispm-ui-icon-file name))
-                  (lispm-ui-icon-file "document-32"))))
-    (if (not (and (display-images-p) (image-type-available-p 'svg)
-                  file (file-readable-p file)))
-        (propertize " " 'display `(space :width (,lispm-finder-icon-size)))
-      (when (> (hash-table-count lispm-finder--icons) 256)
-        (clrhash lispm-finder--icons))
-      (propertize
-       " " 'display
-       (or (gethash (cons file selected) lispm-finder--icons)
-           (puthash (cons file selected)
-                    (let ((svg (with-temp-buffer
-                                 (insert-file-contents file)
-                                 (buffer-string))))
-                      (create-image (if selected (lispm-finder--darken svg) svg) 'svg t
-                                    :height lispm-finder-icon-size :ascent 'center))
-                    lispm-finder--icons))))))
+  (if (not (and (display-images-p) (image-type-available-p 'svg)))
+      (propertize " " 'display `(space :width (,lispm-finder-icon-size)))
+    (let ((fast-key (list 'fast name (and selected t)
+                          (bound-and-true-p lispm-ui-look)
+                          (bound-and-true-p lispm-ui-icon-functions))))
+      (if-let* ((cached (gethash fast-key lispm-finder--icons)))
+          (propertize " " 'display cached)
+        (let ((file (or (and name (lispm-ui-icon-file name))
+                        (lispm-ui-icon-file "document-32"))))
+          (if (not (and file (file-readable-p file)))
+              (propertize " " 'display `(space :width (,lispm-finder-icon-size)))
+            (let ((image (or (gethash (cons file selected) lispm-finder--icons)
+                             (let ((svg (with-temp-buffer
+                                          (insert-file-contents file)
+                                          (buffer-string))))
+                               (lispm-finder--evict-icons-half)
+                               (puthash (cons file selected)
+                                        (create-image (if selected (lispm-finder--darken svg) svg)
+                                                      'svg t
+                                                      :height lispm-finder-icon-size
+                                                      :ascent 'center)
+                                        lispm-finder--icons)))))
+              (lispm-finder--evict-icons-half)
+              (puthash fast-key image lispm-finder--icons)
+              (propertize " " 'display image))))))))
 
 (defun lispm-finder--header ()
   "Return the window's header: the enclosing-folder button and item count strip."
@@ -340,11 +365,41 @@ When TRAILING-PAD is non-nil, include trailing margin."
            'keymap lispm-finder--up-button-map
            (lispm-finder--target-plist lispm-finder--up-target))))
 
+(defvar lispm-finder-fs-info-ttl 5.0
+  "Seconds to cache `file-system-info' available disk space per directory.")
+
+(defvar lispm-finder--fs-info-cache (make-hash-table :test #'equal)
+  "Cached disk free space by directory: `(TIMESTAMP AVAILABLE . FN)'.")
+
+(defun lispm-finder--available-space (directory)
+  "Return free bytes on DIRECTORY's filesystem, cached with a short TTL."
+  (let* ((fn (symbol-function 'file-system-info))
+         (entry (gethash directory lispm-finder--fs-info-cache))
+         (now (float-time)))
+    (if (and entry
+             (eq (cddr entry) fn)
+             (> lispm-finder-fs-info-ttl 0)
+             (< (- now (car entry)) lispm-finder-fs-info-ttl))
+        (cadr entry)
+      (let ((avail (nth 2 (ignore-errors (file-system-info directory)))))
+        (when (>= (hash-table-count lispm-finder--fs-info-cache) 64)
+          (let ((drop (/ (hash-table-count lispm-finder--fs-info-cache) 2))
+                (victims nil))
+            (maphash (lambda (k _v)
+                       (when (> drop 0)
+                         (push k victims)
+                         (setq drop (1- drop))))
+                     lispm-finder--fs-info-cache)
+            (dolist (k victims)
+              (remhash k lispm-finder--fs-info-cache))))
+        (puthash directory (cons now (cons avail fn)) lispm-finder--fs-info-cache)
+        avail))))
+
 (defun lispm-finder--info ()
   "Return what the window's header says: its items, and the room left on disk."
   (let ((count (length lispm-finder--items))
         (available (and (stringp lispm-finder--directory)
-                        (nth 2 (ignore-errors (file-system-info lispm-finder--directory))))))
+                        (lispm-finder--available-space lispm-finder--directory))))
     (if available
         (lispm-finder-tr-n "%d item, %s available" "%d items, %s available" count
                            count (file-size-human-readable available 'si " " "B"))

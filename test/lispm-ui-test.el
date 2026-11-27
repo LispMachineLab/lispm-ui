@@ -320,6 +320,28 @@ reaches so far from the left or the right."
   (should (equal (get-text-property 0 'display (lispm-ui-text-to 8 t))
                  '(space :align-to (- right (8))))))
 
+(ert-deftest lispm-ui-test-text-width-cache ()
+  "Plain short strings memoize `lispm-ui-text-width' across identical state."
+  (lispm-ui-text-width-clear-cache)
+  (let ((calls 0)
+        (lispm-ui-palette-generation 101))
+    (cl-letf (((symbol-function 'string-pixel-width)
+               (lambda (s) (setq calls (1+ calls)) (* 10 (length s)))))
+      (should (= (lispm-ui-text-width "File" 'lispm-ui-title) 40))
+      (should (= (lispm-ui-text-width "File" 'lispm-ui-title) 40))
+      (should (= calls 1))
+      ;; Propertized input bypasses plain cache and preserves per-span measurement.
+      (should (= (lispm-ui-text-width (propertize "File" 'face 'bold) 'lispm-ui-title) 40))
+      (should (= calls 2))
+      ;; Palette generation change invalidates cleanly.
+      (let ((lispm-ui-palette-generation 102))
+        (should (= (lispm-ui-text-width "File" 'lispm-ui-title) 40))
+        (should (= calls 3))))
+    ;; Different `cl-letf' width function does not hit prior mock's cached entry.
+    (cl-letf (((symbol-function 'string-pixel-width)
+               (lambda (s) (* 20 (length s)))))
+      (should (= (lispm-ui-text-width "File" 'lispm-ui-title) 80)))))
+
 (ert-deftest lispm-ui-test-cjk-family ()
   "Chinese and Japanese are drawn in a family for the language spoken,
 the first installed; another language takes Simplified Chinese's."
@@ -336,8 +358,9 @@ the first installed; another language takes Simplified Chinese's."
 
 (ert-deftest lispm-ui-test-image-cache ()
   "An image is drawn once for its key in a palette, again in the next
-palette, and apart for each look; the cache is emptied past 512 images."
+palette, and apart for each look; eviction keeps recent hot images."
   (let ((lispm-ui--images (make-hash-table :test #'equal))
+        (lispm-ui--images-lru (make-hash-table :test #'equal))
         (lispm-ui-palette-generation 1)
         (drawn 0))
     (cl-flet ((draw () (setq drawn (1+ drawn)) "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"2\" height=\"2\"/>"))
@@ -351,9 +374,34 @@ palette, and apart for each look; the cache is emptied past 512 images."
       (let ((lispm-ui-look 'classic)) (lispm-ui-look-image '(dot 1) #'draw))
       (let ((lispm-ui-look 'other)) (lispm-ui-look-image '(dot 1) #'draw))
       (should (= drawn 4))
+      ;; Touch a filler key earlier than hot generation-2 entries so LRU evicts cold keys.
       (dotimes (i 520) (puthash (list 'filler i) t lispm-ui--images))
       (lispm-ui-image '(dot 2) #'draw)
-      (should (= (hash-table-count lispm-ui--images) 1)))))
+      (should (= drawn 5))
+      (should (<= (hash-table-count lispm-ui--images) 260))
+      ;; Hot entries from the active generation survived partial eviction.
+      (lispm-ui-image '(dot 1) #'draw)
+      (let ((lispm-ui-look 'other)) (lispm-ui-look-image '(dot 1) #'draw))
+      (should (= drawn 5)))))
+
+(ert-deftest lispm-ui-test-sized-image-isolation ()
+  "Resize-varying images use their own bounded cache without evicting `lispm-ui--images'."
+  (let ((lispm-ui--images (make-hash-table :test #'equal))
+        (lispm-ui--images-lru (make-hash-table :test #'equal))
+        (lispm-ui--sized-images (make-hash-table :test #'equal))
+        (lispm-ui--sized-images-lru (make-hash-table :test #'equal))
+        (lispm-ui-sized-image-cache-limit 8)
+        (lispm-ui-palette-generation 10)
+        (drawn 0))
+    (cl-flet ((draw () (setq drawn (1+ drawn)) "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"/>"))
+      (let ((steady (lispm-ui-image 'steady-chrome #'draw)))
+        (dotimes (w 20)
+          (lispm-ui-sized-image (list 'strip w) #'draw))
+        (should (eq (lispm-ui-image 'steady-chrome #'draw) steady))
+        (should (<= (hash-table-count lispm-ui--sized-images) 8))
+        (lispm-ui-image--evict-stale 11)
+        (should (= (hash-table-count lispm-ui--images) 0))
+        (should (= (hash-table-count lispm-ui--sized-images) 0))))))
 
 (ert-deftest lispm-ui-test-svg-named-twice ()
   "An SVG an editor wrote, an attribute of its own named as one of SVG's
@@ -667,6 +715,39 @@ that a button it sits in does not underline it."
                       (get-text-property 0 'display icon))))))
     (cl-letf (((symbol-function 'display-images-p) #'ignore))
       (should (equal (get-text-property 0 'display (lispm-ui-icon 'caution)) '(space :width (16)))))))
+
+(ert-deftest lispm-ui-test-icon-fast-path-and-catalog ()
+  "Repeated `lispm-ui-icon' hits skip `lispm-ui-icon-file' and file stat checks."
+  (should (equal (plist-get (lispm-ui-icons-catalog-entry "search") :tty) "⌕"))
+  (let ((lispm-ui-icons-catalog '(("custom-dyn" :tty "D"))))
+    (should (equal (plist-get (lispm-ui-icons-catalog-entry 'custom-dyn) :tty) "D")))
+  (let ((lispm-ui--icons (make-hash-table :test #'equal))
+        (lispm-ui-current-palette (lispm-ui-derive-palette "#ffffff" "#111111" "#666666" "#2563eb"))
+        (file-lookups 0))
+    (lispm-ui-tokens--sync)
+    (cl-letf* (((symbol-function 'lispm-ui-tty-p) (lambda (&optional _) nil))
+               ((symbol-function 'display-images-p) (lambda (&rest _) t))
+               (orig-file (symbol-function 'lispm-ui-icon-file))
+               ((symbol-function 'lispm-ui-icon-file)
+                (lambda (name) (setq file-lookups (1+ file-lookups)) (funcall orig-file name))))
+      (let ((first (lispm-ui-icon 'search :size 16 :tint "#223344"))
+            (second (lispm-ui-icon 'search :size 16 :tint "#223344")))
+        (should (= file-lookups 1))
+        (should (eq (get-text-property 0 'display first)
+                    (get-text-property 0 'display second))))
+      ;; Re-registering or look changes miss cleanly rather than serving stale icons.
+      (let ((lispm-ui-look 'other))
+        (lispm-ui-icon 'search :size 16 :tint "#223344")
+        (should (= file-lookups 2)))
+      (unwind-protect
+          (progn
+            (lispm-ui-icon-register 'fast-temp
+                                    :svg "<svg viewBox=\"0 0 16 16\"><rect width=\"8\" height=\"8\"/></svg>")
+            (let ((before (get-text-property 0 'display (lispm-ui-icon 'fast-temp))))
+              (lispm-ui-icon-register 'fast-temp
+                                      :svg "<svg viewBox=\"0 0 16 16\"><circle cx=\"8\" cy=\"8\" r=\"4\"/></svg>")
+              (should-not (eq (get-text-property 0 'display (lispm-ui-icon 'fast-temp)) before))))
+        (lispm-ui-icon-unregister 'fast-temp)))))
 
 (ert-deftest lispm-ui-test-tty-text-icons ()
   "On a text terminal an icon is a character a cell wide: the entry of

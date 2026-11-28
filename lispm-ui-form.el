@@ -156,6 +156,9 @@ of its lines."
 (defvar-local lispm-ui-form--values nil
   "The values of the form in this buffer: an alist (KEY . VALUE).")
 
+(defvar-local lispm-ui-form--initial-snapshot nil
+  "Normalized initial `(KEY . VALUE)' snapshot of editable fields.")
+
 (defvar-local lispm-ui-form--signals nil
   "Alist `(KEY . SIGNAL)` of reactive source signals for each field in this form.")
 
@@ -338,6 +341,9 @@ called with no argument in its buffer before it is drawn."
       (lispm-ui-form--init-signals)
       (when setup
         (funcall setup))
+      (setq lispm-ui-form--initial-snapshot
+            (mapcar (lambda (field) (cons (car field) (lispm-ui-form-value (car field))))
+                    (seq-filter #'lispm-ui-form--editable-field-p lispm-ui-form--fields)))
       (lispm-ui-form--draw)
       (goto-char (point-min))
       (lispm-ui-form--first-field))
@@ -375,12 +381,27 @@ A text is trimmed, a password not; either is nil when empty."
     (mapcar (lambda (field) (cons (car field) (lispm-ui-form-value (car field))))
             lispm-ui-form--fields)))
 
+(defun lispm-ui-form--editable-field-p (field)
+  "Return non-nil when FIELD holds editable form input."
+  (not (memq (plist-get (cdr field) :type) '(heading buttons rows status))))
+
+(defun lispm-ui-form-modified-p (&optional buffer)
+  "Return non-nil when any editable field in BUFFER differs from initial values."
+  (with-current-buffer (or buffer (current-buffer))
+    (and (derived-mode-p 'lispm-ui-form-mode)
+         (seq-some (lambda (field)
+                     (let ((key (car field)))
+                       (not (equal (lispm-ui-form-value key)
+                                   (alist-get key lispm-ui-form--initial-snapshot)))))
+                   (seq-filter #'lispm-ui-form--editable-field-p lispm-ui-form--fields))
+         t)))
+
 (defun lispm-ui-form-values ()
   "The values of the fields of the form in this buffer that are shown: an alist."
   (mapcar (lambda (field) (cons (car field) (lispm-ui-form-value (car field))))
           (seq-filter (lambda (field)
                         (and (lispm-ui-form--shown-p field)
-                             (not (memq (plist-get (cdr field) :type) '(heading buttons rows status)))))
+                             (lispm-ui-form--editable-field-p field)))
                       lispm-ui-form--fields)))
 
 (defun lispm-ui-form-set (key value &rest more)
@@ -862,36 +883,6 @@ KEY's."
     (max 0 (- (apply #'+ (mapcar (lambda (button) (+ em (lispm-ui-form--button-width (car button) nil)))
                                  buttons))
               em))))
-
-(defun lispm-ui-form--columns (rows start)
-  "The pixels the columns of ROWS, as a rows field has them, start at: the
-first where START, a key of the form's geometry, says, each other two ems
-after the widest text of the one before."
-  (let* ((em (plist-get lispm-ui-form--geometry :em))
-         (texts (mapcar (lambda (row) (ensure-list (plist-get row :text))) rows))
-         (x (plist-get lispm-ui-form--geometry start))
-         (columns nil))
-    (dotimes (column (apply #'max 0 (mapcar #'length texts)))
-      (push x columns)
-      (setq x (+ x (* 2 em) (apply #'max 0 (mapcar (lambda (each) (lispm-ui-form--measure (or (nth column each) "")))
-                                                   texts)))))
-    (nreverse columns)))
-
-(defun lispm-ui-form--draw-row (key row columns)
-  "Insert ROW of the rows field KEY: its texts at COLUMNS, pixels, the last
-one cut to the room its buttons leave, and its buttons at the right; a
-row of buttons alone has them where its text would start."
-  (let* ((buttons (plist-get row :buttons))
-         (texts (ensure-list (plist-get row :text)))
-         (width (lispm-ui-form--buttons-width buttons))
-         (room (- (plist-get lispm-ui-form--geometry :right) width
-                  (if buttons (plist-get lispm-ui-form--geometry :em) 0))))
-    (cl-loop for (text . more) on texts
-             for x in columns
-             do (insert (lispm-ui-form--at x) (if more text (lispm-ui-form--fit text (- room x)))))
-    (when buttons
-      (insert (if texts (lispm-ui-form--at :right width) (lispm-ui-form--at (car columns))))
-      (lispm-ui-form--insert-buttons key buttons))))
 
 (defun lispm-ui-form-redraw ()
   "Draw the form in this buffer again, as it is, point staying where it was;

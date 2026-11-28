@@ -43,21 +43,22 @@
 
 (defun lispm-ui-popup-available-p ()
   "Return non-nil when menus and alerts can pop up: in an interactive Emacs
-on a graphical display, or on a text terminal whose Emacs shows child
-frames there, drawn in text, see `lispm-ui-popup-text-p'."
+on a graphical display with SVG support, or on a text terminal whose
+Emacs shows child frames there, drawn in text, see `lispm-ui-popup-text-p'."
   (and (not noninteractive) lispm-ui-current-palette
-       (or (display-graphic-p) (lispm-ui-popup-text-p))))
+       (or (and (display-graphic-p) (not (lispm-ui-tty-p)))
+           (lispm-ui-popup-text-p))))
 
 (defun lispm-ui-popup-graphic-p ()
   "Return non-nil when popups can be drawn as images: on a graphical display.
 Panels such as the workspaces' thumbnails have no text to show instead."
-  (and (display-graphic-p) (lispm-ui-popup-available-p)))
+  (and (display-graphic-p) (not (lispm-ui-tty-p)) (lispm-ui-popup-available-p)))
 
 (defun lispm-ui-popup-text-p ()
   "Return non-nil when menus and alerts pop up as text, in child frames of a
 text terminal, which Emacs 31 shows: outlined in lines Emacs draws round
 them, see `standard-display-unicode-special-glyphs'."
-  (and (lispm-ui-tty-p) (featurep 'tty-child-frames)))
+  (and (not (display-graphic-p)) (lispm-ui-tty-p) (featurep 'tty-child-frames)))
 
 (defun lispm-ui-popup-make-frame (parent)
   "Return a hidden child frame of PARENT with a buffer of its own.

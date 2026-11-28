@@ -426,6 +426,7 @@ otherwise."
                          (lispm-ui-alert--state-focused st))
                         (redisplay t)))
               (lispm-ui-modal-run
+               :frame popup
                :initial (lispm-ui-alert--make-state)
                :step (lambda (st event)
                        (lispm-ui-alert--step

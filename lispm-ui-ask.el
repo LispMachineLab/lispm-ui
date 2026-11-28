@@ -506,6 +506,11 @@ Uses a modal form when available, else `read-number'."
         (lispm-ui--prompt-project-directory "Select project"))
     (apply orig-fn args)))
 
+(defun lispm-ui--delegate-completion-p (count require-match)
+  "Return non-nil when COUNT candidates with REQUIRE-MATCH delegate to minibuffer."
+  (or (> count 60)
+      (and (= count 0) require-match)))
+
 (defun lispm-ui--intercept-completing-read (orig-fn prompt collection
                                                     &optional predicate require-match
                                                     initial-input hist def
@@ -524,6 +529,10 @@ Uses a modal form when available, else `read-number'."
         (cond
          ((member "... (choose a dir)" candidates)
           (lispm-ui--prompt-project-directory prompt candidates (or init def-val)))
+         ((lispm-ui--delegate-completion-p count require-match)
+          (lispm-ui-without-gui-action
+            (funcall orig-fn prompt collection predicate require-match
+                     initial-input hist def inherit-input-method)))
          ((and require-match (>= count 1) (<= count 30))
           (let ((chosen (lispm-ui-choose (mapcar (lambda (c) (cons c c)) candidates)
                                          (or def-val init)
@@ -537,8 +546,8 @@ Uses a modal form when available, else `read-number'."
            prompt
            :initial init
            :default def-val
-           :choices (and (<= count 60) candidates)
-           :require-match (and require-match (<= count 60) (> count 0) t)
+           :choices candidates
+           :require-match (and require-match (> count 0) t)
            :validate (and require-match
                           (lambda (val)
                             (let ((s (or val def-val "")))

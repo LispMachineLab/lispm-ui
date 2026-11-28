@@ -59,8 +59,7 @@
 (declare-function lispm-ui-form--glyph "lispm-ui-form" (kind state &optional label))
 (declare-function lispm-ui-form--button "lispm-ui-form" (label action &optional default))
 (declare-function lispm-ui-form--rows "lispm-ui-form" (field))
-(declare-function lispm-ui-form--columns "lispm-ui-form" (rows start))
-(declare-function lispm-ui-form--draw-row "lispm-ui-form" (key row columns))
+(declare-function lispm-ui-form--buttons-width "lispm-ui-form" (buttons))
 (declare-function lispm-ui-form--help "lispm-ui-form" (help at))
 (declare-function lispm-ui-form--apply-text-props "lispm-ui-form-ext" (widget props value))
 (declare-function lispm-ui-form--choices "lispm-ui-form" (field))
@@ -144,6 +143,35 @@
      (when value
        (insert " ")
        (lispm-ui-form--button (lispm-ui-tr "Remove") (lambda () (lispm-ui-form--changed key nil t)))))))
+
+(defun lispm-ui-form--columns (rows start)
+  "Return pixel offsets of columns in ROWS starting at geometry key START."
+  (let* ((em (plist-get lispm-ui-form--geometry :em))
+         (texts (mapcar (lambda (row) (ensure-list (plist-get row :text))) rows))
+         (x (plist-get lispm-ui-form--geometry start))
+         (columns nil))
+    (dotimes (column (apply #'max 0 (mapcar #'length texts)))
+      (push x columns)
+      (setq x (+ x (* 2 em)
+                 (apply #'max 0 (mapcar (lambda (each)
+                                          (lispm-ui-form--measure (or (nth column each) "")))
+                                        texts)))))
+    (nreverse columns)))
+
+(defun lispm-ui-form--draw-row (key row columns)
+  "Insert ROW of rows field KEY at pixel COLUMNS, fitting the final column."
+  (let* ((buttons (plist-get row :buttons))
+         (texts (ensure-list (plist-get row :text)))
+         (width (lispm-ui-form--buttons-width buttons))
+         (room (- (plist-get lispm-ui-form--geometry :right) width
+                  (if buttons (plist-get lispm-ui-form--geometry :em) 0))))
+    (cl-loop for (text . more) on texts
+             for x in columns
+             do (insert (lispm-ui-form--at x)
+                        (if more text (lispm-ui-form--fit text (- room x)))))
+    (when buttons
+      (insert (if texts (lispm-ui-form--at :right width) (lispm-ui-form--at (car columns))))
+      (lispm-ui-form--insert-buttons key buttons))))
 
 (defun lispm-ui-form--draw-rows-field (key field props start label-fn row-fn)
   "Insert a `rows' field KEY with FIELD definition and PROPS at START."

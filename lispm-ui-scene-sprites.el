@@ -184,7 +184,7 @@ A/a accessories, and C cheeks.")
   (clrhash lispm-ui-scene--avatars))
 
 (defun lispm-ui-scene-reset-assignments (&optional kind)
-  "Reset shuffled session assignments for KIND (`portrait', `room', or nil).
+  "Reset session assignments for KIND (`portrait', `room', or nil).
 When KIND is nil, both portrait and room assignment tables are cleared."
   (when (memq kind '(nil portrait))
     (clrhash lispm-ui-scene--portrait-assignments)
@@ -193,38 +193,65 @@ When KIND is nil, both portrait and room assignment tables are cleared."
     (clrhash lispm-ui-scene--room-assignments)
     (setq lispm-ui-scene--room-pool nil)))
 
-(defun lispm-ui-scene--deck-assign (key count assignments pool-symbol)
-  "Return KEY's stable index in [0, COUNT), drawing from shuffled POOL-SYMBOL."
+(defun lispm-ui-scene-seed-index (key count &optional salt)
+  "Return deterministic index in `[0, COUNT)' hashed from KEY and optional SALT."
+  (let ((n (max 1 count))
+        (digest (md5 (prin1-to-string (if salt (cons salt key) key)))))
+    (mod (string-to-number (substring digest 0 7) 16) n)))
+
+(defun lispm-ui-scene--deck-assign (key count assignments pool-symbol &optional salt)
+  "Return KEY's deterministic collision-free index in `[0, COUNT)'."
   (or (gethash key assignments)
       (progn
         (unless (symbol-value pool-symbol)
-          (let ((deck (vconcat (number-sequence 0 (1- count)))))
-            (cl-loop for i downfrom (1- count) above 0 do
-                     (let* ((j (random (1+ i)))
-                            (tmp (aref deck i)))
-                       (aset deck i (aref deck j))
-                       (aset deck j tmp)))
-            (set pool-symbol (append deck nil))))
-        (let ((index (pop (symbol-value pool-symbol))))
+          (set pool-symbol (number-sequence 0 (1- count))))
+        (let* ((pool (symbol-value pool-symbol))
+               (preferred (lispm-ui-scene-seed-index key count salt))
+               (index (or (cl-loop for step from 0 below count
+                                   for candidate = (mod (+ preferred step) count)
+                                   when (memql candidate pool)
+                                   return candidate)
+                          (car pool))))
+          (set pool-symbol (delq index pool))
           (puthash (copy-tree key) index assignments)
           index))))
 
+(defun lispm-ui-scene--explicit-catalog-index (spec catalog)
+  "Resolve explicit SPEC (integer index or `:id' symbol) in vector CATALOG."
+  (cond
+   ((and (integerp spec) (>= spec 0) (< spec (length catalog)))
+    spec)
+   ((and (symbolp spec) spec)
+    (cl-position spec catalog :key (lambda (item) (plist-get item :id)) :test #'eq))))
+
 (defun lispm-ui-scene-portrait-index (node)
-  "Return NODE's stable shuffled portrait index."
-  (lispm-ui-scene--deck-assign
-   (plist-get node :key) (length lispm-ui-scene-portraits)
-   lispm-ui-scene--portrait-assignments 'lispm-ui-scene--portrait-pool))
+  "Return NODE's deterministic portrait index."
+  (or (lispm-ui-scene--explicit-catalog-index
+       (plist-get node :portrait) lispm-ui-scene-portraits)
+      (let ((identity (or (plist-get node :seed)
+                          (plist-get node :key)
+                          (plist-get node :id)
+                          (plist-get node :name))))
+        (lispm-ui-scene--deck-assign
+         identity (length lispm-ui-scene-portraits)
+         lispm-ui-scene--portrait-assignments 'lispm-ui-scene--portrait-pool
+         'portrait))))
 
 (defun lispm-ui-scene-portrait-for-node (node)
   "Return the portrait plist assigned to NODE."
   (aref lispm-ui-scene-portraits (lispm-ui-scene-portrait-index node)))
 
 (defun lispm-ui-scene-room-style (room)
-  "Return ROOM's stable shuffled interior style."
-  (let* ((key (list (plist-get room :root) (plist-get room :id)))
-         (index (lispm-ui-scene--deck-assign
-                 key (length lispm-ui-scene-room-styles)
-                 lispm-ui-scene--room-assignments 'lispm-ui-scene--room-pool)))
+  "Return ROOM's deterministic interior style."
+  (let* ((explicit (lispm-ui-scene--explicit-catalog-index
+                    (plist-get room :style) lispm-ui-scene-room-styles))
+         (key (or (plist-get room :seed)
+                  (list (plist-get room :root) (plist-get room :id))))
+         (index (or explicit
+                    (lispm-ui-scene--deck-assign
+                     key (length lispm-ui-scene-room-styles)
+                     lispm-ui-scene--room-assignments 'lispm-ui-scene--room-pool
+                     'room))))
     (aref lispm-ui-scene-room-styles index)))
 
 ;;;; SVG primitives

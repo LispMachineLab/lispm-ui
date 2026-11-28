@@ -36,6 +36,7 @@
 (require 'dom)
 (require 'svg)
 (require 'xml)
+(require 'lispm-ui-i18n)
 (require 'lispm-ui-draw)
 (require 'lispm-ui-palette)
 (require 'lispm-ui-scene-layout)
@@ -69,30 +70,44 @@ Properties are :state, :label, :chip-label, :badge, :dot, and
   (let* ((state (or (plist-get status :state) 'unknown))
          (kind (plist-get status :kind)))
     (pcase state
-      ('working '(:state working :label "Working" :chip-label "Working"
-                  :badge nil :dot "#389b6c" :accent-key :focus))
-      ('idle '(:state idle :label "Idle" :chip-label "Idle"
-               :badge nil :dot "#8e8375" :accent-key :muted))
-      ('done '(:state done :label "Complete" :chip-label "Complete"
-               :badge "OK" :dot "#4b7da8" :accent-color "#4b8663"))
-      ('error '(:state error :label "Error" :chip-label "Error"
-                :badge "ERR" :dot "#c94a4a" :accent-key :alert-dark))
+      ('working
+       (let ((label (lispm-ui-tr "Working")))
+         (list :state 'working :label label :chip-label label
+               :badge nil :dot "#389b6c" :accent-key :focus)))
+      ('idle
+       (let ((label (lispm-ui-tr "Idle")))
+         (list :state 'idle :label label :chip-label label
+               :badge nil :dot "#8e8375" :accent-key :muted)))
+      ('done
+       (let ((label (lispm-ui-tr "Complete")))
+         (list :state 'done :label label :chip-label label
+               :badge "OK" :dot "#4b7da8" :accent-color "#4b8663")))
+      ('error
+       (let ((label (lispm-ui-tr "Error")))
+         (list :state 'error :label label :chip-label label
+               :badge "ERR" :dot "#c94a4a" :accent-key :alert-dark)))
       ('blocked
        (pcase kind
-         ('permission '(:state blocked :label "Approval needed"
-                        :chip-label "Waiting for approval" :badge "!"
-                        :dot "#d98b26" :accent-color "#b88432"))
-         ('question '(:state blocked :label "Needs answer"
-                      :chip-label "Needs an answer" :badge "?"
-                      :dot "#d98b26" :accent-color "#b88432"))
-         ('auth '(:state blocked :label "Sign-in needed"
-                  :chip-label "Needs authentication" :badge "AUTH"
-                  :dot "#d98b26" :accent-color "#b88432"))
-         (_ '(:state blocked :label "Paused"
-              :chip-label "Waiting" :badge "WAIT"
-              :dot "#d98b26" :accent-color "#b88432"))))
-      (_ '(:state unknown :label "Active" :chip-label "Status unavailable"
-           :badge nil :dot "#8e8375" :accent-key :muted)))))
+         ('permission
+          (list :state 'blocked :label (lispm-ui-tr "Approval needed")
+                :chip-label (lispm-ui-tr "Waiting for approval") :badge "!"
+                :dot "#d98b26" :accent-color "#b88432"))
+         ('question
+          (list :state 'blocked :label (lispm-ui-tr "Needs answer")
+                :chip-label (lispm-ui-tr "Needs an answer") :badge "?"
+                :dot "#d98b26" :accent-color "#b88432"))
+         ('auth
+          (list :state 'blocked :label (lispm-ui-tr "Sign-in needed")
+                :chip-label (lispm-ui-tr "Needs authentication") :badge "AUTH"
+                :dot "#d98b26" :accent-color "#b88432"))
+         (_
+          (list :state 'blocked :label (lispm-ui-tr "Paused")
+                :chip-label (lispm-ui-tr "Waiting") :badge "WAIT"
+                :dot "#d98b26" :accent-color "#b88432"))))
+      (_
+       (list :state 'unknown :label (lispm-ui-tr "Active")
+             :chip-label (lispm-ui-tr "Status unavailable")
+             :badge nil :dot "#8e8375" :accent-key :muted)))))
 
 (defun lispm-ui-scene-state-label (status &optional chip-p)
   "Return concise human label for STATUS; CHIP-P selects detailed sheet phrasing."
@@ -195,7 +210,7 @@ Properties are :state, :label, :chip-label, :badge, :dot, and
 
 (defun lispm-ui-scene-desk-label (node &optional lead-p)
   "Return compact desk label for NODE, keeping suffixes; LEAD-P marks coordinator."
-  (let ((name (or (plist-get node :name) "Agent"))
+  (let ((name (or (plist-get node :name) (lispm-ui-tr "Agent")))
         (sub-p (plist-get node :parent)))
     (cond
      ((string-match "\\`\\([^@]+\\)@.*\\(<[0-9]+>\\)\\'" name)
@@ -405,8 +420,10 @@ use an internal session table."
   "Return ordered action button alist for NODE with STATUS."
   (append (when (and (eq (lispm-ui-scene-node-state node) 'blocked)
                      (eq (plist-get status :kind) 'permission))
-            '((approve . "Approve")))
-          '((open-chat . "Chat") (send . "Message") (inspect . "Details"))))
+            (list (cons 'approve (lispm-ui-tr "Approve"))))
+          (list (cons 'open-chat (lispm-ui-tr "Chat"))
+                (cons 'send (lispm-ui-tr "Message"))
+                (cons 'inspect (lispm-ui-tr "Details")))))
 
 (defun lispm-ui-scene--draw-docket-actions (group node status bounds dx accent focus)
   "Draw action buttons for NODE and STATUS in GROUP; return (BX . HITS)."
@@ -419,7 +436,7 @@ use an internal session table."
          (hits nil))
     (dolist (btn (reverse (lispm-ui-scene--docket-buttons node status)))
       (let* ((label (cdr btn))
-             (bw (+ 12 (* (length label) 5.6)))
+             (bw (+ 12 (* (string-width label) 5.6)))
              (bh (if compact 11 18))
              (by (+ dy (/ (- dh bh) 2.0)))
              (primary (eq (car btn) 'approve)))
@@ -488,16 +505,21 @@ use an internal session table."
                (cols (max 14 (floor (/ (- bx tx 8) 5.5))))
                (queued (plist-get (plist-get node :mailbox) :queued))
                (waits (plist-get node :waits-on))
-               (role (if (plist-get node :parent) "Subagent · " ""))
+               (role (if (plist-get node :parent)
+                         (concat (lispm-ui-tr "Subagent") " · ")
+                       ""))
                (meta (concat role state-text
                              (if (and (numberp queued) (> queued 0))
-                                 (format " · Inbox: %d" queued) "")
-                             (if waits (format " · Waiting (%d)" (length waits)) "")
+                                 (concat " · " (lispm-ui-tr "Inbox: %d" queued))
+                               "")
+                             (if waits
+                                 (concat " · " (lispm-ui-tr "Waiting (%d)" (length waits)))
+                               "")
                              (if (and (eq state 'working) (zerop (% phase 2))) " ●" "")))
                (activity (cond ((not (string-empty-p msg)) msg)
                                ((eq state 'done)
-                                "Task completed — click desk again, Details, or Chat to view transcript")
-                               (t "Ready at desk — click desk again, Details, or press RET to inspect"))))
+                                (lispm-ui-tr "Task completed — click desk again, Details, or Chat to view transcript"))
+                               (t (lispm-ui-tr "Ready at desk — click desk again, Details, or press RET to inspect")))))
           (lispm-ui-scene-svg-text group (concat name "  [" meta "]")
                                    tx (+ dy 15) 9 "#352e28" "start" cols "bold")
           (lispm-ui-scene-svg-text group activity
@@ -659,9 +681,10 @@ Lines carry KEY-PROP (default `lispm-ui-scene-key') and ROOM-PROP
                       (when-let* ((parent (plist-get node :parent)))
                         (puthash parent t table))))))
     (dolist (item rooms)
-      (insert (propertize (format "%s  (%d agents)\n"
+      (insert (propertize (format "%s  (%s)\n"
                                   (lispm-ui-scene-sanitize-label (plist-get item :label))
-                                  (length (plist-get item :nodes)))
+                                  (lispm-ui-tr-n "%d agent" "%d agents"
+                                                 (length (plist-get item :nodes))))
                           'face 'bold room-prop (plist-get item :id)))
       (dolist (node (plist-get item :nodes))
         (let* ((key (plist-get node :key))
@@ -672,13 +695,13 @@ Lines carry KEY-PROP (default `lispm-ui-scene-key') and ROOM-PROP
                (queued (plist-get (plist-get node :mailbox) :queued))
                (state (lispm-ui-scene-node-state node))
                (status (plist-get node :status))
-               (text (format "%s %-18s [%s%s] inbox:%s%s\n"
+               (text (format "%s %-18s [%s%s] %s%s\n"
                              (if (equal key selected) ">" " ")
                              (lispm-ui-scene-sanitize-label
                               (concat prefix (or (plist-get node :name) "")) 18)
                              state
                              (if badge (concat " " badge) "")
-                             (if (numberp queued) queued "?")
+                             (lispm-ui-tr "inbox:%s" (if (numberp queued) queued "?"))
                              (if (plist-get status :msg)
                                  (concat "  "
                                          (lispm-ui-scene-sanitize-label
@@ -686,19 +709,21 @@ Lines carry KEY-PROP (default `lispm-ui-scene-key') and ROOM-PROP
                                ""))))
           (insert (propertize text key-prop key room-prop (plist-get item :id)
                               'mouse-face 'highlight
-                              'help-echo "Inspect this agent"
+                              'help-echo (lispm-ui-tr "Inspect this agent")
                               'face (and (equal key selected) 'highlight)))
           (when (plist-get node :waits-on)
             (insert (propertize
-                     (format "    Waits on: %s\n"
-                             (mapconcat (lambda (target)
-                                          (let ((other (lispm-ui-scene-endpoint
-                                                        target (plist-get plan :nodes))))
-                                            (lispm-ui-scene-sanitize-label
-                                             (if other
-                                                 (plist-get other :name)
-                                               (format "%S" target)))))
-                                        (plist-get node :waits-on) ", "))
+                     (format "    %s\n"
+                             (lispm-ui-tr
+                              "Waits on: %s"
+                              (mapconcat (lambda (target)
+                                           (let ((other (lispm-ui-scene-endpoint
+                                                         target (plist-get plan :nodes))))
+                                             (lispm-ui-scene-sanitize-label
+                                              (if other
+                                                  (plist-get other :name)
+                                                (format "%S" target)))))
+                                         (plist-get node :waits-on) ", ")))
                      key-prop key room-prop (plist-get item :id))))))
       (insert "\n"))))
 

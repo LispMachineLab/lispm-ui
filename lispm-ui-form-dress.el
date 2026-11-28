@@ -52,12 +52,17 @@
 (declare-function lispm-ui-form "lispm-ui-form" (title fields &rest args))
 (declare-function lispm-ui-form-geometry "lispm-ui-form" (&optional buffer))
 (declare-function lispm-ui-form-value "lispm-ui-form" (key))
+(declare-function lispm-ui-form-modified-p "lispm-ui-form" (&optional buffer))
 (declare-function lispm-ui-form-set "lispm-ui-form" (key value &rest more))
 (declare-function lispm-ui-form-redraw "lispm-ui-form" ())
 (declare-function lispm-ui-form-cancel "lispm-ui-form" ())
 (declare-function lispm-ui-form--first-field "lispm-ui-form" ())
 (declare-function lispm-ui-form--keep-point "lispm-ui-form-widgets" ())
 (declare-function lispm-ui--save-file-in-minibuffer "lispm-ui-ask" (title directory name))
+(declare-function evil-normal-state "ext:evil-states" (&optional arg))
+(defvar evil-local-mode)
+(defvar evil-state)
+(defvar lispm-ui-form--props)
 
 ;;;; Dressing
 
@@ -291,7 +296,8 @@ returns a function of no arguments that closes it when the prompt ends.")
 (defun lispm-ui-form--modal-show-default (buffer)
   "Show modal form BUFFER in a child frame or window; return a cleanup function."
   (if (and (not noninteractive)
-           (or (display-graphic-p) (featurep 'tty-child-frames)))
+           (or (and (display-graphic-p) (not (lispm-ui-tty-p)))
+               (and (not (display-graphic-p)) (featurep 'tty-child-frames))))
       (let* ((prev-frame (selected-frame))
              (parent prev-frame))
         (while (frame-parent parent)
@@ -409,11 +415,31 @@ field widgets."
       `((:value :type ,val-type :label ,title
                 :value ,init-val :submit t :validate ,validate ,@change-prop))))))
 
+(defun lispm-ui-form--evil-editing-state-p ()
+  "Return non-nil when Evil mode is active in insert or replace state."
+  (and (bound-and-true-p evil-local-mode)
+       (memq (bound-and-true-p evil-state) '(insert replace))
+       (fboundp 'evil-normal-state)))
+
+(defun lispm-ui-form-escape ()
+  "Handle `<escape>' in a form without accidental data loss or Evil trap.
+In Evil insert or replace state, switch to normal state instead of
+cancelling.  Otherwise confirm before discarding modified user input."
+  (interactive)
+  (cond
+   ((lispm-ui-form--evil-editing-state-p)
+    (evil-normal-state))
+   ((or noninteractive
+        (plist-get lispm-ui-form--props :instant)
+        (not (lispm-ui-form-modified-p))
+        (lispm-ui-confirm (lispm-ui-tr "Discard changes?")))
+    (lispm-ui-form-cancel))))
+
 (defun lispm-ui-form--setup-modal-keymap ()
-  "Bind `keyboard-quit', `<escape>', and `ESC ESC' to `lispm-ui-form-cancel'."
+  "Bind `keyboard-quit', `<escape>', and `ESC ESC' for modal form buffers."
   (use-local-map (copy-keymap (current-local-map)))
   (local-set-key [remap keyboard-quit] #'lispm-ui-form-cancel)
-  (local-set-key (kbd "<escape>") #'lispm-ui-form-cancel)
+  (local-set-key (kbd "<escape>") #'lispm-ui-form-escape)
   (local-set-key (kbd "ESC ESC") #'lispm-ui-form-cancel))
 
 (defun lispm-ui-form--prompt-browse-buttons (title init-val base-dir choice-pairs buffer-fn)
@@ -438,13 +464,35 @@ field widgets."
                                            :preset (and (assoc abbr choice-pairs) abbr))
                       (lispm-ui-form-set :value abbr))))))))))))
 
+(defun lispm-ui-form--modal-redirect-focus-p (closing modal-frame orig-frame buffer modal-depth)
+  "Return non-nil when focus strayed to ORIG-FRAME while MODAL-FRAME owns input."
+  (and (not closing)
+       modal-frame
+       (frame-live-p modal-frame)
+       (frame-visible-p modal-frame)
+       (buffer-live-p buffer)
+       (= (recursion-depth) modal-depth)
+       (null (active-minibuffer-window))
+       (eq (selected-frame) orig-frame)))
+
+(defun lispm-ui-form--make-modal-exiter (depth on-done)
+  "Return modal exit closure for recursion DEPTH invoking ON-DONE."
+  (lambda (ok &optional val from-kill)
+    (if (and (not from-kill) (> (recursion-depth) (1+ depth)))
+        (user-error "%s" (lispm-ui-tr "Finish the active prompt first"))
+      (funcall on-done ok val)
+      (when (= (recursion-depth) (1+ depth))
+        (exit-recursive-edit)))))
+
 (defun lispm-ui-form--run-modal-buffer (buffer)
   "Show modal form BUFFER, run `recursive-edit', and clean up on exit."
   (let ((orig-frame (selected-frame))
         (modal-frame nil)
+        (modal-depth (1+ (recursion-depth)))
         (cleanup nil)
         (closing nil)
-        (on-delete-frame nil))
+        (on-delete-frame nil)
+        (on-selection-change nil))
     (setq on-delete-frame
           (lambda (frame)
             (when (and (not closing)
@@ -458,8 +506,18 @@ field widgets."
           (setq cleanup (funcall lispm-ui-form-modal-show-function buffer))
           (let ((shown-frame (selected-frame)))
             (unless (eq shown-frame orig-frame)
-              (setq modal-frame shown-frame)
-              (add-hook 'delete-frame-functions on-delete-frame)))
+              (setq modal-frame shown-frame
+                    on-selection-change
+                    (lambda (_frame)
+                      (when (lispm-ui-form--modal-redirect-focus-p
+                             closing modal-frame orig-frame buffer modal-depth)
+                        (raise-frame modal-frame)
+                        (select-frame-set-input-focus modal-frame)
+                        (let ((root (frame-root-window modal-frame)))
+                          (when (window-live-p root)
+                            (select-window root))))))
+              (add-hook 'delete-frame-functions on-delete-frame)
+              (add-hook 'window-selection-change-functions on-selection-change)))
           (with-current-buffer buffer
             (lispm-ui-form--first-field)
             (lispm-ui-form--keep-point)
@@ -469,6 +527,8 @@ field widgets."
             (recursive-edit)))
       (setq closing t)
       (remove-hook 'delete-frame-functions on-delete-frame)
+      (when on-selection-change
+        (remove-hook 'window-selection-change-functions on-selection-change))
       (when (functionp cleanup)
         (ignore-errors (funcall cleanup)))
       (when (buffer-live-p buffer)
@@ -487,25 +547,24 @@ them.  Cancelling or closing the buffer signals `quit'."
            (result nil)
            (buffer nil)
            (depth (recursion-depth))
-           (exit-with (lambda (ok &optional vals)
-                        (when (<= (recursion-depth) (1+ depth))
-                          (setq closing t
-                                submitted ok
-                                result vals)
-                          (when (= (recursion-depth) (1+ depth))
-                            (exit-recursive-edit))))))
+           (exit-with (lispm-ui-form--make-modal-exiter
+                       depth
+                       (lambda (ok vals)
+                         (setq closing t
+                               submitted ok
+                               result vals)))))
       (setq buffer
             (lispm-ui-form
              title fields
              :values values :submit submit :cancel cancel :intro intro :modal t
              :on-submit (lambda (vals) (funcall exit-with t vals))
-             :on-cancel (apply-partially exit-with nil)
+             :on-cancel (lambda () (funcall exit-with nil))
              :setup (lambda ()
                       (lispm-ui-form--setup-modal-keymap)
                       (when setup (funcall setup)))))
       (with-current-buffer buffer
         (add-hook 'kill-buffer-hook
-                  (lambda () (unless closing (funcall exit-with nil)))
+                  (lambda () (unless closing (funcall exit-with nil nil t)))
                   nil t))
       (unwind-protect
           (lispm-ui-form--run-modal-buffer buffer)
@@ -549,13 +608,12 @@ signals `quit'."
            (result nil)
            (buffer nil)
            (depth (recursion-depth))
-           (exit-with (lambda (ok &optional val)
-                        (when (<= (recursion-depth) (1+ depth))
-                          (setq closing t
-                                submitted ok
-                                result val)
-                          (when (= (recursion-depth) (1+ depth))
-                            (exit-recursive-edit)))))
+           (exit-with (lispm-ui-form--make-modal-exiter
+                       depth
+                       (lambda (ok val)
+                         (setq closing t
+                               submitted ok
+                               result val))))
            (on-preset (lambda (val)
                         (when (and val (buffer-live-p buffer))
                           (with-current-buffer buffer
@@ -578,11 +636,11 @@ signals `quit'."
                                    (or (alist-get :value values)
                                        (and (stringp default) default)
                                        "")))
-             :on-cancel (apply-partially exit-with nil)
+             :on-cancel (lambda () (funcall exit-with nil))
              :setup #'lispm-ui-form--setup-modal-keymap))
       (with-current-buffer buffer
         (add-hook 'kill-buffer-hook
-                  (lambda () (unless closing (funcall exit-with nil)))
+                  (lambda () (unless closing (funcall exit-with nil nil t)))
                   nil t))
       (unwind-protect
           (lispm-ui-form--run-modal-buffer buffer)

@@ -229,7 +229,15 @@ When OK-P is non-nil, each event must also satisfy OK-P."
         (push next unread-command-events))))
   delta)
 
-(cl-defun lispm-ui-modal-run (&key initial step render effect)
+(defun lispm-ui-modal-raise (frame)
+  "Keep modal popup FRAME and its shadow raised above its parent frame."
+  (when (and (not noninteractive) (framep frame) (frame-live-p frame))
+    (let ((shadow (frame-parameter frame 'lispm-ui-popup-shadow)))
+      (when (and (framep shadow) (frame-live-p shadow))
+        (raise-frame shadow)))
+    (raise-frame frame)))
+
+(cl-defun lispm-ui-modal-run (&key initial step render effect frame)
   "Run a pure reactive modal loop starting from INITIAL state.
 STEP is called as `(funcall STEP state event)' and returns
 `(NEXT-STATE . ACTIONS)'.  Each action in ACTIONS is processed:
@@ -250,6 +258,11 @@ STEP is called as `(funcall STEP state event)' and returns
                      (stepped (funcall step (lispm-ui-signal-get state-sig) event))
                      (next-state (car stepped))
                      (actions (cdr stepped)))
+                (when (and frame
+                           (or (eq (car-safe event) 'switch-frame)
+                               (and (lispm-ui-modal-mouse-down-p event)
+                                    (not (lispm-ui-modal-over event frame)))))
+                  (lispm-ui-modal-raise frame))
                 (lispm-ui-signal-set state-sig next-state)
                 (dolist (act actions)
                   (pcase act

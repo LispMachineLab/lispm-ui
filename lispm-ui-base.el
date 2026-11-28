@@ -44,11 +44,15 @@
 pictures, icons/.")
 
 (defun lispm-ui-tty-p (&optional frame)
-  "Return non-nil when FRAME, by default the selected one, is on a text terminal.
-Controls are then drawn in text, cells for pixels.  A batch Emacs has
-no display to draw on and is not one: what it draws, as for tests, is
-what a graphical display gets."
-  (and (not noninteractive) (not (display-graphic-p frame))))
+  "Return non-nil when FRAME, by default the selected one, draws in text.
+Controls are then drawn in text, cells for pixels: on a text terminal,
+or in an interactive graphical Emacs built without SVG support.  A batch
+Emacs has no display to draw on and is not one: what it draws, as for
+tests, is what a graphical display gets."
+  (and (not noninteractive)
+       (or (not (display-graphic-p frame))
+           (and (fboundp 'image-type-available-p)
+                (not (image-type-available-p 'svg))))))
 
 (defun lispm-ui-px (pixels)
   "Return PIXELS, a length drawn in pixels, for the selected frame.

@@ -255,6 +255,70 @@ for each that is there."
 
 ;;;; Keys
 
+(defun lispm-ui-file-dialog--clean-path (raw)
+  "Return trimmed single-line path candidate from RAW, or nil."
+  (when (and (stringp raw) (not (string-match-p "[\n\r\0]" raw)))
+    (let* ((trimmed (string-trim raw))
+           (unquoted (if (and (>= (length trimmed) 2)
+                              (string-prefix-p "\"" trimmed)
+                              (string-suffix-p "\"" trimmed))
+                         (substring trimmed 1 -1)
+                       trimmed)))
+      (and (not (string-empty-p unquoted)) unquoted))))
+
+(defun lispm-ui-file-dialog--path-like-p (text)
+  "Return non-nil when TEXT syntactically resembles a file or folder path."
+  (and (stringp text)
+       (string-match-p "\\`[~.]\\|/" text)
+       t))
+
+(defun lispm-ui-file-dialog--go-to-path (dialog raw &optional require-new-p)
+  "Navigate DIALOG to existing folder or file RAW; return non-nil when moved.
+When REQUIRE-NEW-P is non-nil, return nil if DIALOG already shows that target."
+  (when-let* ((clean (lispm-ui-file-dialog--clean-path raw)))
+    (let* ((cur-dir (or (lispm-ui-file-dialog--dialog-directory dialog)
+                        default-directory))
+           (expanded (expand-file-name clean cur-dir))
+           (target (cond
+                    ((file-directory-p expanded)
+                     (cons (file-name-as-directory expanded) nil))
+                    ((file-exists-p expanded)
+                     (cons (file-name-directory expanded)
+                           (file-name-nondirectory expanded))))))
+      (when (and target
+                 (not (and require-new-p
+                           (equal (car target) cur-dir)
+                           (or (null (cdr target))
+                               (equal (cdr target)
+                                      (car (lispm-ui-file-dialog--item dialog)))))))
+        (lispm-ui-file-dialog--go dialog (car target) (cdr target))
+        t))))
+
+(defun lispm-ui-file-dialog--paste-path (dialog &optional require-new-p)
+  "Navigate DIALOG to a file or folder path on the clipboard if valid."
+  (let ((clip (lispm-ui-file-dialog--clean-path (ignore-errors (current-kill 0 t)))))
+    (and (lispm-ui-file-dialog--path-like-p clip)
+         (lispm-ui-file-dialog--go-to-path dialog clip require-new-p))))
+
+(defun lispm-ui-file-dialog--prompt-path (dialog &optional start-dir)
+  "Read a path starting from START-DIR and navigate DIALOG to it."
+  (let* ((base (file-name-as-directory
+                (expand-file-name
+                 (or start-dir
+                     (lispm-ui-file-dialog--dialog-directory dialog)
+                     default-directory))))
+         (chosen (condition-case nil
+                     (let ((use-dialog-box nil)
+                           (lispm-ui--intercepting t))
+                       (lispm-ui-without-gui-action
+                         (read-file-name (lispm-ui-tr "Folder: ") base base nil nil)))
+                   (quit nil))))
+    (and (stringp chosen)
+         (or (lispm-ui-file-dialog--go-to-path dialog chosen)
+             (let ((parent (file-name-directory (expand-file-name chosen base))))
+               (and parent (file-directory-p parent)
+                    (progn (lispm-ui-file-dialog--go dialog parent) t)))))))
+
 (defun lispm-ui-file-dialog--key (dialog event)
   "Do what EVENT, a key, does in DIALOG.
 Return the file chosen, `cancel', `ignore' when EVENT does nothing,
@@ -273,7 +337,17 @@ or nil while the dialog stays."
       (_
        (pcase event
          ((or ?\C-v 'next) (lispm-ui-file-dialog--select dialog (+ (max selected 0) rows)) nil)
-         ((or ?\M-v 'prior) (lispm-ui-file-dialog--select dialog (max 0 (- selected rows))) nil)
+         ('prior (lispm-ui-file-dialog--select dialog (max 0 (- selected rows))) nil)
+         (?\M-v
+          (unless (lispm-ui-file-dialog--paste-path dialog t)
+            (lispm-ui-file-dialog--select dialog (max 0 (- selected rows))))
+          nil)
+         ((or ?\C-y ?\s-v 'yank)
+          (if (lispm-ui-file-dialog--paste-path dialog) nil 'ignore))
+         (?\C-l
+          (if (lispm-ui-file-dialog--prompt-path dialog) nil 'ignore))
+         (?/
+          (if (lispm-ui-file-dialog--prompt-path dialog "/") nil 'ignore))
          ((or ?\M-< 'home) (lispm-ui-file-dialog--select dialog 0) nil)
          ((or ?\M-> 'end)
           (lispm-ui-file-dialog--select dialog (1- (length (lispm-ui-file-dialog--dialog-items dialog))))
@@ -776,6 +850,8 @@ cancelled; return the file, or nil."
                (result
                 (cond
                  ((lispm-ui-modal-mouse-down-p event)
+                  (unless (lispm-ui-modal-over event frame)
+                    (lispm-ui-modal-raise frame))
                   (lispm-ui-file-dialog--click frame dialog event))
                  (wheel
                   (if (not (lispm-ui-modal-over event frame))
@@ -788,8 +864,10 @@ cancelled; return the file, or nil."
                       (if (= old (lispm-ui-file-dialog--dialog-top dialog))
                           'ignore
                         nil))))
+                 ((eq (car-safe event) 'switch-frame)
+                  (lispm-ui-modal-raise frame)
+                  'ignore)
                  ((or (mouse-event-p event) (mouse-movement-p event)) 'ignore)
-                 ((eq event ?/) (lispm-ui-file-dialog--shortcut frame dialog t) nil)
                  ((and (lispm-ui-modal-confirm-p event)
                        (or (lispm-ui-file-dialog--item dialog)
                            (lispm-ui-file-dialog--directory-only-p dialog)))
@@ -805,7 +883,9 @@ cancelled; return the file, or nil."
             ('cancel (throw 'done nil))
             ((pred stringp) (throw 'done result))
             ('ignore nil)
-            (_ (lispm-ui-file-dialog--show frame dialog))))))))
+            (_
+             (lispm-ui-modal-raise frame)
+             (lispm-ui-file-dialog--show frame dialog))))))))
 
 (cl-defun lispm-ui-file-dialog (&key title file directory predicate preview)
   "Show LispM UI's dialog choosing a file; return the file chosen, or nil.

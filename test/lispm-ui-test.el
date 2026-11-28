@@ -4052,7 +4052,7 @@ at the end for editing, even when `delete-selection-mode' is nil."
           (lispm-ui-form--setup-modal-keymap)
           (should (eq (key-binding (kbd "M-a")) #'lispm-ui-form-select-field))
           (should (eq (lookup-key (current-local-map) [remap keyboard-quit]) #'lispm-ui-form-cancel))
-          (should (eq (lookup-key (current-local-map) (kbd "<escape>")) #'lispm-ui-form-cancel))
+          (should (eq (lookup-key (current-local-map) (kbd "<escape>")) #'lispm-ui-form-escape))
           (should (eq (lookup-key (current-local-map) (kbd "ESC ESC")) #'lispm-ui-form-cancel)))
       (kill-buffer buf)))
   ;; 2. `lispm-ui-look' variable watcher keeps `lispm-ui-look-signal' synced,
@@ -4220,6 +4220,174 @@ at the end for editing, even when `delete-selection-mode' is nil."
       (let ((unread-command-events '(?\C-@ return)))
         (should (equal (lispm-ui-file-dialog :directory folder :predicate #'file-directory-p)
                        (file-name-as-directory (expand-file-name folder))))))))
+
+;;;; Usability audit regressions (v0.14.2)
+
+(ert-deftest lispm-ui-test-completing-read-over-60-delegates ()
+  "Candidate sets larger than 60 delegate to `orig-fn' rather than opening a
+blind form prompt with `:choices nil', while empty optional completion
+still opens `lispm-ui-form-prompt'."
+  (let ((many (mapcar (lambda (i) (format "cand-%03d" i)) (number-sequence 1 75)))
+        (orig-calls nil)
+        (form-calls nil))
+    (cl-letf (((symbol-function 'lispm-ui-gui-action-p) (lambda () t))
+              ((symbol-function 'lispm-ui-popup-available-p) (lambda () t))
+              ((symbol-function 'lispm-ui-form-prompt)
+               (lambda (prompt &rest args)
+                 (push (cons prompt args) form-calls)
+                 "from-form")))
+      (let ((orig (lambda (prompt collection &rest rest)
+                    (push (list prompt (length collection) rest) orig-calls)
+                    "from-orig")))
+        (should (equal (lispm-ui--intercept-completing-read
+                        orig "Pick: " many nil t)
+                       "from-orig"))
+        (should (= (length orig-calls) 1))
+        (should-not form-calls)
+        (should (equal (lispm-ui--intercept-completing-read
+                        orig "Pick optional: " many nil nil)
+                       "from-orig"))
+        (should (= (length orig-calls) 2))
+        (should-not form-calls)
+        (should (equal (lispm-ui--intercept-completing-read
+                        orig "Free input: " nil nil nil)
+                       "from-form"))
+        (should (= (length form-calls) 1))
+        (should (equal (lispm-ui--intercept-completing-read
+                        orig "Dynamic required: " nil nil t)
+                       "from-orig"))
+        (should (= (length orig-calls) 3))))))
+
+(ert-deftest lispm-ui-test-form-modified-and-escape ()
+  "Verify `lispm-ui-form-modified-p', Evil insert escape, modified discard
+confirmation, unmodified immediate cancel, and nested recursion guard."
+  (let* ((cancelled 0)
+         (confirmed-prompts nil)
+         (confirm-answer nil)
+         (normal-called 0)
+         (buf (lispm-ui-form "Edit"
+                             '((name :type text :label "Name" :value "ada")
+                               (note :type status :value "ready"))
+                             :on-cancel (lambda () (cl-incf cancelled)))))
+    (unwind-protect
+        (with-current-buffer buf
+          (should-not (lispm-ui-form-modified-p))
+          ;; Updating a non-editable status field does not mark form modified:
+          (lispm-ui-form-set 'note "updated")
+          (should-not (lispm-ui-form-modified-p))
+          ;; Evil insert state transitions to normal state without cancelling:
+          (setq-local evil-local-mode t
+                      evil-state 'insert)
+          (cl-letf (((symbol-function 'evil-normal-state)
+                     (lambda (&optional _)
+                       (cl-incf normal-called)
+                       (setq-local evil-state 'normal))))
+            (lispm-ui-form-escape)
+            (should (= normal-called 1))
+            (should (eq evil-state 'normal))
+            (should (= cancelled 0))
+            (should (buffer-live-p buf)))
+          (setq-local evil-local-mode nil)
+          ;; Modifying an editable field marks the form modified:
+          (lispm-ui-form-set 'name "grace")
+          (should (lispm-ui-form-modified-p))
+          (cl-letf (((symbol-function 'lispm-ui-confirm)
+                     (lambda (q &rest _)
+                       (push q confirmed-prompts)
+                       confirm-answer)))
+            (let ((noninteractive nil))
+              ;; Declining confirmation preserves the form:
+              (setq confirm-answer nil)
+              (lispm-ui-form-escape)
+              (should (= (length confirmed-prompts) 1))
+              (should (= cancelled 0))
+              (should (buffer-live-p buf))
+              ;; Restoring initial value clears modified state; escape cancels without prompt:
+              (lispm-ui-form-set 'name "ada")
+              (should-not (lispm-ui-form-modified-p))
+              ;; Re-modify and confirm discard -> cancels:
+              (lispm-ui-form-set 'name " hopper ")
+              (should (lispm-ui-form-modified-p))
+              (setq confirm-answer t)
+              (lispm-ui-form-escape)
+              (should (= (length confirmed-prompts) 2))
+              (should (= cancelled 1)))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf))))
+  ;; Unmodified form cancels immediately without prompting in interactive mode:
+  (let* ((cancelled 0)
+         (prompted nil)
+         (buf (lispm-ui-form "Clean"
+                             '((name :type text :label "Name" :value "ada"))
+                             :on-cancel (lambda () (cl-incf cancelled)))))
+    (unwind-protect
+        (with-current-buffer buf
+          (cl-letf (((symbol-function 'lispm-ui-confirm)
+                     (lambda (&rest _) (setq prompted t) t)))
+            (let ((noninteractive nil))
+              (lispm-ui-form-escape)
+              (should-not prompted)
+              (should (= cancelled 1)))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf))))
+  ;; Nested recursion-depth guard signals user-error instead of swallowing:
+  (let ((done nil)
+        (exiter (lispm-ui-form--make-modal-exiter 0 (lambda (ok val) (setq done (cons ok val))))))
+    (cl-letf (((symbol-function 'recursion-depth) (lambda () 2)))
+      (should-error (funcall exiter t '((a . "1"))) :type 'user-error)
+      (should-not done))))
+
+(ert-deftest lispm-ui-test-file-dialog-clipboard-and-path ()
+  "Verify `lispm-ui-file-dialog' navigates to pasted file/folder paths and
+go-to-path input."
+  (lispm-ui-test--with-pictures
+    (let ((sub (expand-file-name "albums" folder))
+          (cover (expand-file-name "albums/cover.png" folder)))
+      (lispm-ui-test--with-file-dialog-keys
+        ;; C-y pastes a file path, navigates to its parent folder, and selects it:
+        (let ((kill-ring nil))
+          (kill-new cover)
+          (let ((unread-command-events '(?\C-y return)))
+            (should (equal (lispm-ui-file-dialog :directory folder :predicate picture-p)
+                           cover))))
+        ;; M-v pastes a directory path when not already there, then Return selects first item:
+        (let ((kill-ring nil))
+          (kill-new sub)
+          (let ((unread-command-events '(?\M-v return)))
+            (should (equal (lispm-ui-file-dialog :directory folder :predicate picture-p)
+                           cover))))
+        ;; `/' prompts for path via `read-file-name' and navigates cleanly:
+        (cl-letf (((symbol-function 'read-file-name)
+                   (lambda (_prompt dir &rest _)
+                     (should (equal dir "/"))
+                     cover)))
+          (let ((unread-command-events '(?/ return)))
+            (should (equal (lispm-ui-file-dialog :directory folder :predicate picture-p)
+                           cover))))))))
+
+(ert-deftest lispm-ui-test-tty-p-svg-guard ()
+  "Verify `lispm-ui-tty-p' returns t in interactive graphic Emacs lacking SVG,
+nil when SVG is available, and nil in batch mode regardless of SVG."
+  ;; Batch mode always returns nil even when `display-graphic-p' is t and SVG is missing:
+  (let ((noninteractive t))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&optional _) t))
+              ((symbol-function 'image-type-available-p) (lambda (_type) nil)))
+      (should-not (lispm-ui-tty-p))))
+  ;; Interactive graphic Emacs without `librsvg' falls back to text rendering:
+  (let ((noninteractive nil))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&optional _) t))
+              ((symbol-function 'image-type-available-p) (lambda (_type) nil)))
+      (should (lispm-ui-tty-p))
+      (let ((lispm-ui-current-palette (lispm-ui-test--classic-palette)))
+        (should-not (lispm-ui-popup-graphic-p))))
+    ;; Interactive graphic Emacs WITH `librsvg' uses graphic rendering:
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&optional _) t))
+              ((symbol-function 'image-type-available-p) (lambda (type) (eq type 'svg))))
+      (should-not (lispm-ui-tty-p)))
+    ;; Interactive TTY Emacs returns t:
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&optional _) nil))
+              ((symbol-function 'image-type-available-p) (lambda (_type) t)))
+      (should (lispm-ui-tty-p)))))
 
 (provide 'lispm-ui-test)
 ;;; lispm-ui-test.el ends here

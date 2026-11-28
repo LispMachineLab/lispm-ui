@@ -614,5 +614,27 @@
           (should (equal clicked "ok"))
           (should completed))))))
 
+(ert-deftest lispm-ui-scene-deterministic-seeds-and-i18n ()
+  "Sprite assignments are deterministic across resets and scene labels localize."
+  (lispm-ui-scene-reset-assignments)
+  (let* ((node-a (lispm-ui-scene-test--record "alpha" "/tmp/det/"))
+         (node-b (list :id "only-id-b"))
+         (idx-a1 (lispm-ui-scene-portrait-index node-a))
+         (idx-b1 (lispm-ui-scene-portrait-index node-b))
+         (style-1 (lispm-ui-scene-room-style '(:id 7 :root "/tmp/det/"))))
+    (lispm-ui-scene-reset-assignments)
+    (should (= (lispm-ui-scene-portrait-index node-a) idx-a1))
+    (should (= (lispm-ui-scene-portrait-index node-b) idx-b1))
+    (should (equal (lispm-ui-scene-room-style '(:id 7 :root "/tmp/det/")) style-1))
+    (should (eq (plist-get (lispm-ui-scene-portrait-for-node '(:id "x" :portrait curls)) :id)
+                'curls)))
+  (let ((lispm-ui-language 'de)
+        (plan (lispm-ui-scene-test--plan-sample)))
+    (should (equal (lispm-ui-scene-state-label '(:state working)) "Arbeitet"))
+    (with-temp-buffer
+      (lispm-ui-scene-render-text plan '(native "lead"))
+      (should (string-match-p "Agenten)" (buffer-string)))
+      (should (string-match-p "Wartet auf:" (buffer-string))))))
+
 (provide 'lispm-ui-scene-test)
 ;;; lispm-ui-scene-test.el ends here
